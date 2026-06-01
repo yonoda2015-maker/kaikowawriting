@@ -23,7 +23,24 @@ GENRE_DESCRIPTIONS = {
     "不思議・オカルト・陰謀論": "オカルト、陰謀論、超常現象、秘密組織",
     "サイコ・ダークな人間ドラマ": "サイコパス、ストーカー、狂気、ダークな人間関係",
     "心霊スポット（世界）": "世界各地の有名心霊スポット・廃墟・呪われた場所",
+    "意味がわかると怖い": "読んだときは普通だが、意味を理解した瞬間に恐怖が来る話",
 }
+
+# 意味がわかると怖いジャンル専用ルール
+IMI_KOWAI_RULES = """
+【意味がわかると怖い話のルール】
+- 表面上は普通の日常・会話・出来事として書く
+- 読んだだけでは「怖い話」に見えないようにする
+- 文章の中に「ひとつだけおかしな点」を隠す
+- その「おかしな点」の意味がわかった瞬間に全てが怖くなる構造にする
+- 答え・解説は絶対に書かない。読者自身が気づく余白を作る
+- タイトルや末尾に「わかった？」「気づいた？」などのヒントを添えてもよい
+- 典型的な構造例：
+  ・「ある言葉・行動が実は死を示していた」
+  ・「語り手自身がすでに死んでいた」
+  ・「普通に見えた場面が実は異常だった」
+  ・「助けを求めていたのに周囲が気づかなかった」
+"""
 
 STYLE_DESCRIPTIONS = {
     "会話風": "セリフのやり取りだけで怖さを表現する。地の文は最小限に。",
@@ -119,7 +136,21 @@ def _parse_title_and_body(raw: str) -> tuple[str, str]:
     return body, title
 
 
-def generate_post(genre: str, style: str, idea: str, char_count: int = 300, x_safe: bool = False) -> str:
+HORROR_LEVEL_INSTRUCTIONS = {
+    1: "怖さレベル1（じんわり不気味）: 読後にわずかな違和感が残る程度。直接的な恐怖描写なし。",
+    2: "怖さレベル2（ちょっと怖い）: 不気味な雰囲気・奇妙な出来事がある。直接的な恐怖は少ない。",
+    3: "怖さレベル3（普通に怖い）: 明確な怖い要素がある。夜に一人で読むと怖いくらい。",
+    4: "怖さレベル4（かなり怖い）: 強い恐怖・衝撃・背筋が凍るシーンがある。",
+    5: "怖さレベル5（トラウマ級）: 読んだ後しばらく頭から離れない。最大限の恐怖を描け。",
+}
+
+
+def _get_horror_level_instruction(horror_level: int) -> str:
+    return HORROR_LEVEL_INSTRUCTIONS.get(horror_level, "")
+
+
+def generate_post(genre: str, style: str, idea: str, char_count: int = 300,
+                  x_safe: bool = False, horror_level: int = 3) -> str:
     # 入力サニタイズ
     san = sanitize_user_input(idea, max_chars=1000)
     if not san.valid:
@@ -130,7 +161,10 @@ def generate_post(genre: str, style: str, idea: str, char_count: int = 300, x_sa
 
     genre_desc = GENRE_DESCRIPTIONS.get(genre, genre)
     style_desc = STYLE_DESCRIPTIONS.get(style, style)
-    policy = X_POLICY_RULES if x_safe else ""
+    policy     = X_POLICY_RULES if x_safe else ""
+    level_inst = _get_horror_level_instruction(horror_level)
+    # 意味がわかると怖いジャンル専用ルール
+    imi_rule   = IMI_KOWAI_RULES if genre == "意味がわかると怖い" else ""
 
     prompt = f"""以下の条件でSNS投稿文を書け。
 
@@ -138,29 +172,37 @@ def generate_post(genre: str, style: str, idea: str, char_count: int = 300, x_sa
 スタイル：{style}（{style_desc}）
 ネタ：{idea}
 目標文字数：約{char_count}字
+{level_inst}
 
 {ANTI_AI_RULES}
 {policy}
+{imi_rule}
 投稿文だけを出力すること。説明・前置き・タイトルは不要。"""
 
     return _call_claude(prompt, max_tokens=1000)
 
 
-def generate_novel(genre: str, idea: str, char_count: int = 3000, x_safe: bool = False, style_hint: str = "") -> tuple[str, str]:
+def generate_novel(genre: str, idea: str, char_count: int = 3000,
+                   x_safe: bool = False, style_hint: str = "",
+                   horror_level: int = 3) -> tuple[str, str]:
     """小説本文とタイトルをtupleで返す。"""
     genre_desc = GENRE_DESCRIPTIONS.get(genre, genre)
     max_tokens = min(8000, char_count * 2)
-    policy = X_POLICY_RULES if x_safe else ""
+    policy     = X_POLICY_RULES if x_safe else ""
+    level_inst = _get_horror_level_instruction(horror_level)
+    imi_rule   = IMI_KOWAI_RULES if genre == "意味がわかると怖い" else ""
 
     prompt = f"""以下の条件でこわ面白い短編小説を書け。
 
 ジャンル：{genre}（{genre_desc}）
 ネタ：{idea}
 目標文字数：約{char_count}字
+{level_inst}
 
 {ANTI_AI_RULES}
 {policy}
 {style_hint}
+{imi_rule}
 - 一人称または三人称で、実話風に書く
 - ラストは「ゾワッとするオチ」にする
 
@@ -176,11 +218,15 @@ def generate_novel(genre: str, idea: str, char_count: int = 3000, x_safe: bool =
     return _parse_title_and_body(raw)
 
 
-def generate_article(genre: str, idea: str, article_type: str, char_count: int = 3000, include_story: bool = False, x_safe: bool = False) -> tuple[str, str]:
+def generate_article(genre: str, idea: str, article_type: str, char_count: int = 3000,
+                     include_story: bool = False, x_safe: bool = False,
+                     horror_level: int = 3) -> tuple[str, str]:
     """記事本文とタイトルをtupleで返す。"""
-    genre_desc = GENRE_DESCRIPTIONS.get(genre, genre)
-    max_tokens = min(8000, char_count * 2)
-    policy = X_POLICY_RULES if x_safe else ""
+    genre_desc     = GENRE_DESCRIPTIONS.get(genre, genre)
+    max_tokens     = min(8000, char_count * 2)
+    policy         = X_POLICY_RULES if x_safe else ""
+    level_inst     = _get_horror_level_instruction(horror_level)
+    imi_rule       = IMI_KOWAI_RULES if genre == "意味がわかると怖い" else ""
     story_instruction = "記事の中に、関連する短編フィクションを1本（500字程度）埋め込むこと。" if include_story else ""
 
     article_type_desc = {
@@ -194,10 +240,12 @@ def generate_article(genre: str, idea: str, article_type: str, char_count: int =
 ジャンル：{genre}（{genre_desc}）
 ネタ：{idea}
 目標文字数：約{char_count}字
+{level_inst}
 {story_instruction}
 
 {ANTI_AI_RULES}
 {policy}
+{imi_rule}
 - 見出しはMarkdown（##）で書く
 - 読者を引き込む書き出しにする
 
@@ -328,7 +376,7 @@ def fetch_trends(categories: list[str] = None) -> list[dict]:
     ]
 
 
-def _fetch_rss_trends(categories: list[str] | None = None, per_feed: int = 3, total: int = 15) -> list[dict]:
+def _fetch_rss_trends(categories: list[str] | None = None, per_feed: int = 4, total: int = 30) -> list[dict]:
     """指定カテゴリのRSSを取得。結果はTTLキャッシュに保存（5分）。"""
     target = categories or list(RSS_FEEDS.keys())
     cache_key = "rss:" + ",".join(sorted(target))
@@ -508,11 +556,13 @@ def build_learning_hint(top_patterns: list[dict]) -> str:
 
 def generate_post_with_learning(genre: str, style: str, idea: str, char_count: int,
                                  x_safe: bool, top_patterns: list[dict],
-                                 style_hint: str = "") -> str:
-    hint = build_learning_hint(top_patterns)
+                                 style_hint: str = "", horror_level: int = 3) -> str:
+    hint       = build_learning_hint(top_patterns)
     genre_desc = GENRE_DESCRIPTIONS.get(genre, genre)
     style_desc = STYLE_DESCRIPTIONS.get(style, style)
-    policy = X_POLICY_RULES if x_safe else ""
+    policy     = X_POLICY_RULES if x_safe else ""
+    level_inst = _get_horror_level_instruction(horror_level)
+    imi_rule   = IMI_KOWAI_RULES if genre == "意味がわかると怖い" else ""
 
     prompt = f"""以下の条件でSNS投稿文を書け。
 
@@ -520,11 +570,13 @@ def generate_post_with_learning(genre: str, style: str, idea: str, char_count: i
 スタイル：{style}（{style_desc}）
 ネタ：{idea}
 目標文字数：約{char_count}字
+{level_inst}
 
 {ANTI_AI_RULES}
 {policy}
 {hint}
 {style_hint}
+{imi_rule}
 
 投稿文だけを出力すること。説明・前置き・タイトルは不要。"""
     return _call_claude(prompt, max_tokens=1000)

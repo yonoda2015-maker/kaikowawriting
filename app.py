@@ -53,6 +53,7 @@ GENRES = [
     "不思議・オカルト・陰謀論",
     "サイコ・ダークな人間ドラマ",
     "心霊スポット（世界）",
+    "意味がわかると怖い",
 ]
 GENRE_DESC = {
     "都市伝説・未解決事件": "失踪・未解決事件・心霊スポットなど",
@@ -77,13 +78,20 @@ STYLE_TIPS = {
 }
 ARTICLE_TYPES = ["まとめ記事", "解説記事"]
 GENRE_DESC = {
-    **{
-        "都市伝説・未解決事件": "失踪・未解決事件・心霊スポットなど",
-        "ホラー体験談・怪談":   "実話風の怖い体験・怪談・呪い",
-        "不思議・オカルト・陰謀論": "超常現象・陰謀論・不思議な話",
-        "サイコ・ダークな人間ドラマ": "狂気・ストーカー・ダークな人間関係",
-        "心霊スポット（世界）": "世界各地の心霊スポット・廃墟・呪われた場所",
-    }
+    "都市伝説・未解決事件": "失踪・未解決事件・心霊スポットなど",
+    "ホラー体験談・怪談":   "実話風の怖い体験・怪談・呪い",
+    "不思議・オカルト・陰謀論": "超常現象・陰謀論・不思議な話",
+    "サイコ・ダークな人間ドラマ": "狂気・ストーカー・ダークな人間関係",
+    "心霊スポット（世界）": "世界各地の心霊スポット・廃墟・呪われた場所",
+    "意味がわかると怖い": "読んで意味がわかった瞬間に怖くなる話。答えは書かない",
+}
+
+HORROR_LEVEL_LABELS = {
+    1: "★☆☆☆☆　じんわり不気味",
+    2: "★★☆☆☆　ちょっと怖い",
+    3: "★★★☆☆　普通に怖い（推奨）",
+    4: "★★★★☆　かなり怖い",
+    5: "★★★★★　トラウマ級",
 }
 
 st.set_page_config(
@@ -375,6 +383,16 @@ with tab_post:
         char_count = st.slider("文字数", 100, 1000, 280, 50, key="post_chars",
                                help="X（Twitter）は280文字、Threadsは500文字が上限です")
 
+        horror_level = st.select_slider(
+            "👻 怖さのレベル",
+            options=[1, 2, 3, 4, 5],
+            value=3,
+            format_func=lambda x: HORROR_LEVEL_LABELS[x],
+            key="post_horror_level",
+        )
+        if genre == "意味がわかると怖い":
+            st.info("💡 意味がわかると怖いジャンル：表面上は普通の話として書き、意味がわかった瞬間に怖くなる構造にします。答えは書きません。")
+
         with st.expander("🔬 上級者向け：A/Bテスト（2スタイルを比較する）"):
             ab_mode = st.toggle("A/Bテストをオンにする", key="post_ab_mode")
             style_b = st.selectbox("比較スタイルB", [s for s in STYLES if s != style], key="post_style_b") if ab_mode else STYLES[0]
@@ -425,7 +443,7 @@ with tab_post:
                     db.save_trends(trends)
                     st.session_state["trends"] = trends
                     st.session_state["trend_ideas"] = suggest_idea_from_trends(trends, genre)
-            for t in st.session_state.get("trends", [])[:3]:
+            for t in st.session_state.get("trends", [])[:10]:
                 st.markdown(f'<div class="trend-card">📰 {t["source"].split("／")[-1]}｜{t["keyword"][:50]}</div>', unsafe_allow_html=True)
             for i, item in enumerate(st.session_state.get("trend_ideas", [])):
                 ti1, ti2 = st.columns([4, 1])
@@ -517,7 +535,7 @@ with tab_post:
                                 "post_score": calc_quality_score(ca),
                             })
                         else:
-                            content = generate_post_with_learning(genre, style, idea_text, char_count, get_x_safe(), top_patterns, style_hint=style_hint)
+                            content = generate_post_with_learning(genre, style, idea_text, char_count, get_x_safe(), top_patterns, style_hint=style_hint, horror_level=horror_level)
                             if note_url or aff_url:
                                 content = add_monetization(content, "post", aff_url, note_url)
                             st.session_state.update({
@@ -614,7 +632,7 @@ with tab_post:
                     if st.button("🔄 別のパターンで再生成", key="post_regen", use_container_width=True):
                         with st.spinner("再生成中..."):
                             try:
-                                c = generate_post_with_learning(genre, style, idea_text or "同じテーマで別の文章", char_count, get_x_safe(), top_patterns, style_hint=style_hint)
+                                c = generate_post_with_learning(genre, style, idea_text or "同じテーマで別の文章", char_count, get_x_safe(), top_patterns, style_hint=style_hint, horror_level=horror_level)
                                 st.session_state.update({"post_content": c, "post_pending": c, "post_score": calc_quality_score(c)})
                                 if auto_ht:
                                     st.session_state["post_hashtags"] = generate_hashtags(c, genre)
@@ -738,6 +756,15 @@ with tab_novel:
             if sel_prof_n != "なし（通常どおり）":
                 style_hint_n = build_style_prompt(db.get_all_style_profiles()[sel_prof_n])
 
+        horror_level_n = st.select_slider(
+            "👻 怖さのレベル",
+            options=[1, 2, 3, 4, 5], value=3,
+            format_func=lambda x: HORROR_LEVEL_LABELS[x],
+            key="novel_horror_level",
+        )
+        if genre_n == "意味がわかると怖い":
+            st.info("💡 意味がわかると怖いジャンル：表面上は普通の話として書き、意味がわかった瞬間に怖くなる構造にします。")
+
         with st.expander("💰 収益化オプション（任意）"):
             note_url_n = st.text_input("noteのURL", key="novel_note_url")
             aff_url_n  = st.text_input("アフィリエイトURL", key="novel_aff_url")
@@ -751,7 +778,7 @@ with tab_novel:
             else:
                 with st.spinner(f"小説を書いています...（{novel_chars_input:,}字・数分かかります）"):
                     try:
-                        cn, title_n = generate_novel(genre_n, idea_text_n, novel_chars_input, x_safe=get_x_safe(), style_hint=style_hint_n)
+                        cn, title_n = generate_novel(genre_n, idea_text_n, novel_chars_input, x_safe=get_x_safe(), style_hint=style_hint_n, horror_level=horror_level_n)
                         if note_url_n or aff_url_n:
                             cn = add_monetization(cn, "novel", aff_url_n, note_url_n)
                         st.session_state.update({"novel_content": cn, "novel_pending": cn,
@@ -859,6 +886,15 @@ with tab_article:
         else:
             idea_text_a = st.text_area("ネタを入力", placeholder="例：日本の呪われた場所まとめ", key="article_idea_manual")
 
+        horror_level_a = st.select_slider(
+            "👻 怖さのレベル",
+            options=[1, 2, 3, 4, 5], value=3,
+            format_func=lambda x: HORROR_LEVEL_LABELS[x],
+            key="article_horror_level",
+        )
+        if genre_a == "意味がわかると怖い":
+            st.info("💡 意味がわかると怖いジャンル：表面上は普通の記事として書き、意味がわかった瞬間に怖くなる構造にします。")
+
         with st.expander("💰 収益化オプション（任意）"):
             note_url_a = st.text_input("noteのURL", key="article_note_url")
             aff_url_a  = st.text_input("アフィリエイトURL", key="article_aff_url")
@@ -872,7 +908,7 @@ with tab_article:
             else:
                 with st.spinner(f"記事を書いています...（{article_chars_input:,}字・数分かかります）"):
                     try:
-                        ca, title_a = generate_article(genre_a, idea_text_a, article_type, article_chars_input, include_story, x_safe=get_x_safe())
+                        ca, title_a = generate_article(genre_a, idea_text_a, article_type, article_chars_input, include_story, x_safe=get_x_safe(), horror_level=horror_level_a)
                         if note_url_a or aff_url_a:
                             ca = add_monetization(ca, "article", aff_url_a, note_url_a)
                         st.session_state.update({"article_content": ca, "article_pending": ca,
