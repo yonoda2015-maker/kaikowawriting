@@ -137,6 +137,20 @@ def init_db():
             seed_series
         )
 
+    # 文体プロファイルの初期シード（未設定の作家のみ）
+    try:
+        from default_style_profiles import DEFAULT_STYLE_PROFILES
+        for author, profile in DEFAULT_STYLE_PROFILES.items():
+            key = f"style_profile_{author}"
+            existing = c.execute("SELECT value FROM scheduler_config WHERE key = ?", (key,)).fetchone()
+            if not existing or not existing[0]:
+                c.execute(
+                    "INSERT OR REPLACE INTO scheduler_config (key, value) VALUES (?, ?)",
+                    (key, profile.strip())
+                )
+    except ImportError:
+        pass
+
     conn.commit()
     conn.close()
 
