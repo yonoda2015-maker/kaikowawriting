@@ -1,0 +1,30 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    ports:
+      - "8501:8501"
+    volumes:
+      - app_data:/data        # DBとデータ永続化
+      - app_logs:/app/logs    # ログ永続化
+    environment:
+      # ── 認証 ──────────────────────────────────────
+      APP_USERNAME: admin          # ← ログインユーザー名
+      APP_PASSWORD: yourpassword   # ← パスワードをここに設定
+
+      # ── APIキー ───────────────────────────────────
+      ANTHROPIC_API_KEY: ""        # ← Claude APIキー
+      THREADS_ACCESS_TOKEN: ""     # ← Threadsトークン（任意）
+      THREADS_USER_ID: ""          # ← ThreadsユーザーID（任意）
+      OPENAI_API_KEY: ""           # ← OpenAI APIキー（任意・DALL-E用）
+      SERPER_API_KEY: ""           # ← Serper APIキー（任意）
+
+      # ── DB ────────────────────────────────────────
+      DB_PATH: /data/kowamoshiro.db
+
+    restart: unless-stopped
+
+volumes:
+  app_data:
+  app_logs:

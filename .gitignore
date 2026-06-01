@@ -1,0 +1,9 @@
+.env
+*.db
+__pycache__/
+*.pyc
+*.pyo
+logs/
+*.bak
+.DS_Store
+*.zip
