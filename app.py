@@ -54,6 +54,7 @@ GENRES = [
     "サイコ・ダークな人間ドラマ",
     "心霊スポット（世界）",
     "意味がわかると怖い",
+    "面白くて怖い（おも怖い）",
 ]
 GENRE_DESC = {
     "都市伝説・未解決事件": "失踪・未解決事件・心霊スポットなど",
@@ -84,6 +85,7 @@ GENRE_DESC = {
     "サイコ・ダークな人間ドラマ": "狂気・ストーカー・ダークな人間関係",
     "心霊スポット（世界）": "世界各地の心霊スポット・廃墟・呪われた場所",
     "意味がわかると怖い": "読んで意味がわかった瞬間に怖くなる話。答えは書かない",
+    "面白くて怖い（おも怖い）": "笑えるのに最後に怖い。コメディ×ホラーの融合ジャンル",
 }
 
 HORROR_LEVEL_LABELS = {
@@ -281,8 +283,30 @@ with st.sidebar:
     with st.expander("📚 文体を学習する"):
         st.caption("作家の文体を学習してAIに反映できます")
         style_source = st.radio("種類", ["青空文庫（無料）", "現代作家（Claude知識）"], key="sb_style_src", horizontal=True)
+
+        # 作家の文体説明（短め）
+        AOZORA_AUTHOR_DESC = {
+            "江戸川乱歩": "猟奇・美と恐怖の融合・密室",
+            "夢野久作": "狂気の語り手・現実と幻覚の境界",
+            "芥川龍之介": "簡潔・人間のエゴを極限状態で描く",
+            "小泉八雲": "民話調・美しさと怪異の融合",
+            "泉鏡花": "幻想・妖艶・水と異界の描写",
+            "太宰治": "自嘲・道化・一人称の内面吐露",
+            "谷崎潤一郎": "耽美・官能・美への狂的執着",
+            "坂口安吾": "虚無・堕落肯定・廃墟の中の生命力",
+            "中島敦": "格調ある漢語体・アイデンティティ崩壊",
+            "幸田露伴": "骨太・意志と運命のぶつかり",
+        }
+        MODERN_AUTHOR_DESC = {a: v.split("】")[0].replace("【","") for a, v in __import__('aozora').MODERN_AUTHORS.items()}
+
         if style_source == "青空文庫（無料）":
-            sel_author = st.selectbox("作家", get_available_authors(), key="sb_aozora_author")
+            authors_list = get_available_authors()
+            sel_author = st.selectbox(
+                "作家",
+                authors_list,
+                format_func=lambda a: f"{a}　{AOZORA_AUTHOR_DESC.get(a, '')}",
+                key="sb_aozora_author"
+            )
             if st.button(f"📖 {sel_author}を学習", key="sb_learn_aozora", use_container_width=True):
                 if not require_api_key():
                     pass
@@ -296,7 +320,13 @@ with st.sidebar:
                         else:
                             st.error("テキスト取得に失敗しました")
         else:
-            sel_modern = st.selectbox("現代作家", get_modern_authors(), key="sb_modern_author")
+            modern_list = get_modern_authors()
+            sel_modern = st.selectbox(
+                "現代作家",
+                modern_list,
+                format_func=lambda a: f"{a}　{MODERN_AUTHOR_DESC.get(a, '')}",
+                key="sb_modern_author"
+            )
             if st.button(f"✨ {sel_modern}を学習", key="sb_learn_modern", use_container_width=True):
                 if not require_api_key():
                     pass
@@ -391,7 +421,9 @@ with tab_post:
             key="post_horror_level",
         )
         if genre == "意味がわかると怖い":
-            st.info("💡 意味がわかると怖いジャンル：表面上は普通の話として書き、意味がわかった瞬間に怖くなる構造にします。答えは書きません。")
+            st.info("💡 表面上は普通の話→意味がわかった瞬間に怖くなる構造。答えは書かず、読者に気づかせます。")
+        elif genre == "面白くて怖い（おも怖い）":
+            st.info("😂👻 最初は笑える展開→最後にゾワッとする構造。コメディのテンポで書き、一文で恐怖を落とします。")
 
         with st.expander("🔬 上級者向け：A/Bテスト（2スタイルを比較する）"):
             ab_mode = st.toggle("A/Bテストをオンにする", key="post_ab_mode")
@@ -473,16 +505,35 @@ with tab_post:
                                      value=st.session_state.get("date_idea", ""), key="post_date_idea")
 
         else:  # シリーズ
-            series_list = [s for s in db.get_all_series() if s["current"] < s["total"]]
+            all_series = db.get_all_series()
+            series_list = [s for s in all_series if s["current"] < s["total"]]
             if series_list:
-                opts_s = {f"{s['name']}　（{s['current']}/{s['total']}回目）": s for s in series_list}
+                opts_s = {f"{s['name']}　（{s['current']}/{s['total']}回）": s for s in series_list}
                 sel_s  = st.selectbox("シリーズを選んでください", list(opts_s.keys()), key="post_series_select")
                 sel_series = opts_s[sel_s]
-                idea_text  = generate_series_idea(sel_series["template"], sel_series["current"] + 1, sel_series["genre"])
-                st.info(f"次のネタ：**{idea_text}**")
-                if st.button("✅ 生成後にシリーズを1回進める", key="advance_series_flag"):
-                    st.session_state["advance_series_id"] = sel_series["id"]
-                    st.success("生成完了後に自動で進めます")
+                next_n     = sel_series["current"] + 1
+                idea_text  = generate_series_idea(sel_series["template"], next_n, sel_series["genre"])
+                # 進捗バー
+                prog = sel_series["current"] / sel_series["total"] if sel_series["total"] > 0 else 0
+                st.progress(prog, text=f"進捗: {sel_series['current']}/{sel_series['total']}回 — 次は第{next_n}回")
+                st.info(f"📝 次のネタ：**{idea_text}**")
+                st.caption("生成するとカウンターが自動で進みます")
+                # 自動進行フラグをセット（ボタン不要）
+                st.session_state["advance_series_id"] = sel_series["id"]
+
+                # シリーズの総数を変更できるUI
+                with st.expander("⚙️ このシリーズの設定を変更"):
+                    new_total = st.number_input(
+                        "総回数を変更する", min_value=next_n, max_value=10000,
+                        value=sel_series["total"], key="series_total_edit"
+                    )
+                    if st.button("💾 総回数を保存", key="save_series_total"):
+                        import sqlite3
+                        conn = sqlite3.connect(db.DB_PATH)
+                        conn.execute("UPDATE series SET total = ? WHERE id = ?", (int(new_total), sel_series["id"]))
+                        conn.commit(); conn.close()
+                        st.success(f"総回数を{new_total}回に変更しました！")
+                        st.rerun()
             else:
                 st.info("シリーズがありません。「🗃️ ネタバンク」タブ → シリーズ管理 で作れます。")
                 idea_text = ""

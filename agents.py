@@ -24,6 +24,7 @@ GENRE_DESCRIPTIONS = {
     "サイコ・ダークな人間ドラマ": "サイコパス、ストーカー、狂気、ダークな人間関係",
     "心霊スポット（世界）": "世界各地の有名心霊スポット・廃墟・呪われた場所",
     "意味がわかると怖い": "読んだときは普通だが、意味を理解した瞬間に恐怖が来る話",
+    "面白くて怖い（おも怖い）": "笑えるのに怖い・怖いのに笑える。コメディとホラーの融合",
 }
 
 # 意味がわかると怖いジャンル専用ルール
@@ -40,6 +41,23 @@ IMI_KOWAI_RULES = """
   ・「語り手自身がすでに死んでいた」
   ・「普通に見えた場面が実は異常だった」
   ・「助けを求めていたのに周囲が気づかなかった」
+"""
+
+# おも怖いジャンル専用ルール
+OMO_KOWAI_RULES = """
+【面白くて怖い（おも怖い）話のルール】
+- 最初は完全にコメディ・ギャグ・笑える展開として書く
+- 読者が「面白い話だな」と思って読み進める
+- 途中か最後に「ゾワッとする恐怖」を一発ぶち込む
+- 笑いと恐怖が同時に来る「おも怖い」を目指す
+- コメディのテンポ・ボケとツッコミ・日常系の軽さを維持する
+- 恐怖の部分は説明せず、一文でズドンと落とす
+- 典型的な構造例：
+  ・「ギャグっぽい状況が実は恐ろしい現実だった」
+  ・「笑えるやり取りの相手が存在しない何かだった」
+  ・「おかしな日常の「おかしさ」の正体が判明して背筋が凍る」
+  ・「面白い体験談かと思ったら最後の一文で全てが変わる」
+- 文体は軽く・テンポよく・口語的に書く
 """
 
 STYLE_DESCRIPTIONS = {
@@ -164,7 +182,7 @@ def generate_post(genre: str, style: str, idea: str, char_count: int = 300,
     policy     = X_POLICY_RULES if x_safe else ""
     level_inst = _get_horror_level_instruction(horror_level)
     # 意味がわかると怖いジャンル専用ルール
-    imi_rule   = IMI_KOWAI_RULES if genre == "意味がわかると怖い" else ""
+    imi_rule   = IMI_KOWAI_RULES if genre == "意味がわかると怖い" else (OMO_KOWAI_RULES if genre == "面白くて怖い（おも怖い）" else "")
 
     prompt = f"""以下の条件でSNS投稿文を書け。
 
@@ -190,7 +208,7 @@ def generate_novel(genre: str, idea: str, char_count: int = 3000,
     max_tokens = min(8000, char_count * 2)
     policy     = X_POLICY_RULES if x_safe else ""
     level_inst = _get_horror_level_instruction(horror_level)
-    imi_rule   = IMI_KOWAI_RULES if genre == "意味がわかると怖い" else ""
+    imi_rule   = IMI_KOWAI_RULES if genre == "意味がわかると怖い" else (OMO_KOWAI_RULES if genre == "面白くて怖い（おも怖い）" else "")
 
     prompt = f"""以下の条件でこわ面白い短編小説を書け。
 
@@ -562,7 +580,7 @@ def generate_post_with_learning(genre: str, style: str, idea: str, char_count: i
     style_desc = STYLE_DESCRIPTIONS.get(style, style)
     policy     = X_POLICY_RULES if x_safe else ""
     level_inst = _get_horror_level_instruction(horror_level)
-    imi_rule   = IMI_KOWAI_RULES if genre == "意味がわかると怖い" else ""
+    imi_rule   = IMI_KOWAI_RULES if genre == "意味がわかると怖い" else (OMO_KOWAI_RULES if genre == "面白くて怖い（おも怖い）" else "")
 
     prompt = f"""以下の条件でSNS投稿文を書け。
 
