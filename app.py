@@ -1048,6 +1048,20 @@ with tab_article:
         )
         if genre_a == "意味がわかると怖い":
             st.info("💡 意味がわかると怖いジャンル：表面上は普通の記事として書き、意味がわかった瞬間に怖くなる構造にします。")
+        elif genre_a == "面白くて怖い（おも怖い）":
+            st.info("😂👻 前半コメディ→最後にゾワッとする構造。笑いと恐怖のギャップを最大化します。")
+        elif genre_a == "王道ホラー（心霊）":
+            st.info("👻 五感の異常・日常の侵食。怪異の姿を直接描写せず恐怖を醸成します。")
+        elif genre_a == "胸糞・ヒトコワ":
+            st.info("😨 幽霊なし。人間の狂気・救いのない後味の悪さ。")
+
+        learned_list_a = [k for k, v in db.get_all_style_profiles().items() if v]
+        style_hint_a   = ""
+        if learned_list_a:
+            sel_prof_a = st.selectbox("📚 参考にする作家の文体（任意）",
+                                      ["なし（通常どおり）"] + learned_list_a, key="article_style_profile")
+            if sel_prof_a != "なし（通常どおり）":
+                style_hint_a = build_style_prompt(db.get_all_style_profiles()[sel_prof_a])
 
         st.markdown("---")
         tips_mode_a = st.toggle("💰 TIPSモード（アフィリエイト50%最適化）", False, key="article_tips_mode",
@@ -1099,7 +1113,7 @@ with tab_article:
                 else:
                     with st.spinner(f"記事を書いています...（{article_chars_input:,}字・数分かかります）"):
                         try:
-                            ca, title_a, title_cands_a = generate_article(genre_a, idea_text_a, article_type, article_chars_input, include_story, x_safe=get_x_safe(), horror_level=horror_level_a)
+                            ca, title_a, title_cands_a = generate_article(genre_a, idea_text_a, article_type, article_chars_input, include_story, x_safe=get_x_safe(), horror_level=horror_level_a, style_hint=style_hint_a)
                             if st.session_state.get("article_note_url") or st.session_state.get("article_aff_url"):
                                 ca = add_monetization(ca, "article", st.session_state.get("article_aff_url", ""), st.session_state.get("article_note_url", ""))
                             st.session_state.update({"article_content": ca, "article_pending": ca,

@@ -157,6 +157,88 @@ def _call_claude(prompt: str, max_tokens: int = 2000, retries: int = 2) -> str:
     raise RuntimeError(f"Claude API呼び出し失敗（{retries+1}回試行）: {last_error}") from last_error
 
 
+def _auto_correct_and_purify(text: str, genre: str = "") -> str:
+    """v3.2 二段階自動修正ガードレール。
+    A) Regex機械的置換 — 禁止表現を物理削除・断定形変換
+    B) LLMメタ検閲 — 物理矛盾・認知のズレ・解説調を検知し自動リライト
+    """
+    # ── A) 機械的置換 ────────────────────────────────────────────
+    substitutions = [
+        (r"実は、?", ""),
+        (r"なんと、?", ""),
+        (r"驚くことに、?", ""),
+        (r"まとめると、?", ""),
+        (r"つまり、?", ""),
+        (r"でしょう", "だ"),
+        (r"かもしれません", "だった"),
+        (r"かもしれない", "だった"),
+        (r"〜と言えるでしょう", "だ"),
+        (r"と言えます", "だ"),
+        (r"おすすめです", ""),
+        (r"ぜひ", ""),
+        (r"〜といった", ""),
+    ]
+    cleaned = text
+    for pattern, replacement in substitutions:
+        cleaned = re.sub(pattern, replacement, cleaned)
+
+    # ── B) LLMメタ検閲（物理・認知矛盾チェック） ──────────────────
+    # 先頭800字のみを検閲対象としてトークンを節約
+    sample = cleaned[:800]
+    meta_prompt = f"""以下のホラー文章を検閲し、JSON のみで出力せよ。
+
+【検閲対象（先頭800字）】
+{sample}
+
+【チェック項目】
+1. 「後から気づく」「帰り道に思い出す」「ふと気がついた」など時間差の認知がある → NG
+2. 登場人物がスマホ・デバイスを使用していない状況でデータ・写真・記録を提示している（物理矛盾）→ NG
+3. 「〜という説がある」「理由は〜だ」「まとめると〜」など解説調・刑事ドラマ風の整理構造がある → NG
+
+判定結果を以下の形式のみで出力（他は一切不要）：
+{{"is_valid": true, "issue": "", "fix_instruction": ""}}
+または
+{{"is_valid": false, "issue": "検知した問題を30字以内で", "fix_instruction": "修正方針を50字以内で"}}"""
+
+    try:
+        censor_raw = _call_claude(meta_prompt, max_tokens=150)
+        try:
+            censor = json.loads(censor_raw)
+        except json.JSONDecodeError:
+            m = re.search(r'\{[^{}]+\}', censor_raw)
+            censor = json.loads(m.group()) if m else {"is_valid": True}
+
+        if not censor.get("is_valid", True):
+            fix_inst = censor.get("fix_instruction", "")
+            issue    = censor.get("issue", "")
+            logger.info(f"_auto_correct_and_purify NG検知: {issue} → {fix_inst}")
+
+            rewrite_prompt = f"""以下のホラー文章を修正し、修正済みの本文のみを出力せよ。
+
+【修正指示】
+{fix_inst}
+
+【具体的な修正方針】
+- 「後から気づく」「ふと思い出す」→「その場でリアルタイムに視線・音・ガジェットの異常として描写する」
+- スマホを触っていないのにデータを見せる → 「手書きのノートを見せる」「テーブルの上で録音LEDが光りっぱなし」など物理的に矛盾しない描写に変える
+- 解説調・整理構造 → 体験が滲む断片的な語りに変える。段落を短く、息を切らしたリズムにする
+
+{ANTI_AI_RULES}
+
+【修正前本文】
+{cleaned}
+
+修正済み本文のみを出力せよ。説明・前置き不要。"""
+
+            cleaned = _call_claude(rewrite_prompt, max_tokens=len(cleaned.encode()) // 1 + 3000)
+
+    except Exception as e:
+        # メタ検閲失敗時はA段階の結果をそのまま使う（出力を止めない）
+        logger.warning(f"_auto_correct_and_purify メタ検閲スキップ: {e}")
+
+    return cleaned
+
+
 def _parse_title_and_body(raw: str) -> tuple[str, str]:
     """【タイトル】【本文】フォーマットからタイトルと本文を分離する。"""
     import re
@@ -406,13 +488,15 @@ ARTICLE_WRITER_RULES = """
 
 def generate_article(genre: str, idea: str, article_type: str, char_count: int = 3000,
                      include_story: bool = False, x_safe: bool = False,
-                     horror_level: int = 3) -> tuple[str, str, list]:
+                     horror_level: int = 3, style_hint: str = "") -> tuple[str, str, list]:
     """記事本文・タイトル・タイトル候補3案をtupleで返す。"""
     genre_desc     = GENRE_DESCRIPTIONS.get(genre, genre)
     max_tokens     = min(8000, char_count * 2)
     policy         = X_POLICY_RULES if x_safe else ""
     level_inst     = _get_horror_level_instruction(horror_level)
     imi_rule       = IMI_KOWAI_RULES if genre == "意味がわかると怖い" else ""
+    omo_rule       = OMO_KOWAI_RULES if genre == "面白くて怖い（おも怖い）" else ""
+    genre_rules    = _get_genre_extra_rules(genre)
     story_instruction = "記事の中に、関連する短編フィクションを1本（500字程度）埋め込むこと。" if include_story else ""
 
     article_type_desc = {
@@ -437,8 +521,11 @@ def generate_article(genre: str, idea: str, article_type: str, char_count: int =
 {QUALITY_BOOST_RULES}
 {SEO_RULES}
 {ARTICLE_WRITER_RULES}
+{genre_rules}
 {policy}
 {imi_rule}
+{omo_rule}
+{style_hint}
 - 見出しはMarkdown（##）で書く
 
 必ず以下のフォーマットで出力すること：
@@ -457,6 +544,7 @@ def generate_article(genre: str, idea: str, article_type: str, char_count: int =
     raw = _call_claude(prompt, max_tokens=max_tokens)
     body, title, candidates = _parse_article_with_candidates(raw)
     body = _consistency_check(body, research_memo, content_type=article_type)
+    body = _auto_correct_and_purify(body, genre)
     return body, title, candidates
 
 
@@ -1252,6 +1340,7 @@ def generate_sns_one_shot(genre: str, style: str, elements: str,
     else:
         logger.info(f"SNS 1 ショット: 生成完了 ({char_len} 字)")
 
+    post_text = _auto_correct_and_purify(post_text, genre)
     return post_text
 
 
@@ -1443,6 +1532,13 @@ def generate_tips_pipeline(
 修正済み本文のみを出力せよ。"""
             chapter_text = _call_claude(rewrite_prompt, max_tokens=2800)
 
+        # v3.2 自動修正ガードレール
+        chapter_text = _auto_correct_and_purify(chapter_text, genre)
+
+        # 第2章末尾にペイウォールマーカーを挿入
+        if ch_num == 2:
+            chapter_text = chapter_text.rstrip() + "\n\n---\n[ここからTIPS有料エリア設定]\n---"
+
         chapter_texts.append(chapter_text)
         # 直前 500 字をスライディングウィンドウとして次章へ引き渡す
         prev_chunk = chapter_text[-500:]
@@ -1482,4 +1578,3 @@ SNS 50% 報酬アフィリエイト紹介文テンプレートを 3 パターン
         "paid_part"    : paid_part,
         "affiliate_kit": affiliate_kit,
     }
-    return results
