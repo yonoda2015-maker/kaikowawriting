@@ -1099,11 +1099,12 @@ with tab_article:
                 else:
                     with st.spinner(f"記事を書いています...（{article_chars_input:,}字・数分かかります）"):
                         try:
-                            ca, title_a = generate_article(genre_a, idea_text_a, article_type, article_chars_input, include_story, x_safe=get_x_safe(), horror_level=horror_level_a)
+                            ca, title_a, title_cands_a = generate_article(genre_a, idea_text_a, article_type, article_chars_input, include_story, x_safe=get_x_safe(), horror_level=horror_level_a)
                             if st.session_state.get("article_note_url") or st.session_state.get("article_aff_url"):
                                 ca = add_monetization(ca, "article", st.session_state.get("article_aff_url", ""), st.session_state.get("article_note_url", ""))
                             st.session_state.update({"article_content": ca, "article_pending": ca,
-                                                      "article_score": calc_quality_score(ca), "article_title": title_a})
+                                                      "article_score": calc_quality_score(ca), "article_title": title_a,
+                                                      "article_title_candidates_main": title_cands_a})
                             if selected_idea_a:
                                 db.mark_idea_used(selected_idea_a["id"])
                             db.save_content("article", genre_a, article_type, ca, st.session_state["article_score"])
@@ -1172,6 +1173,16 @@ with tab_article:
                 with at2:
                     if st.button("📋 タイトル＋全文をコピー", key="article_copy_all_btn", use_container_width=True):
                         st.session_state["_article_copy_all"] = True
+                # タイトル候補3案を表示
+                cands_main = st.session_state.get("article_title_candidates_main", [])
+                if cands_main:
+                    with st.expander("📌 タイトル3案（AIが選ばなかった候補）"):
+                        for i, t in enumerate(cands_main):
+                            tc1, tc2 = st.columns([4, 1])
+                            with tc1: st.markdown(f"**案{i+1}**: {t}")
+                            with tc2:
+                                if st.button("使う", key=f"use_title_main_a_{i}", use_container_width=True):
+                                    st.session_state["article_title"] = t; st.rerun()
             else:
                 edited_title_a = ""
 

@@ -167,6 +167,23 @@ def _parse_title_and_body(raw: str) -> tuple[str, str]:
     return body, title
 
 
+def _parse_article_with_candidates(raw: str) -> tuple[str, str, list[str]]:
+    """記事専用パーサー。【タイトル案】【タイトル】【本文】を分離する。
+    Returns: (body, title, title_candidates)
+    """
+    import re
+    # タイトル案を抽出（案1: / 案2: / 案3: 形式）
+    candidates_block = re.search(r"【タイトル案】\s*\n([\s\S]+?)(?=【タイトル】)", raw)
+    candidates: list[str] = []
+    if candidates_block:
+        for line in candidates_block.group(1).splitlines():
+            m = re.match(r"案\d+[：:]\s*(.+)", line.strip())
+            if m:
+                candidates.append(m.group(1).strip())
+    body, title = _parse_title_and_body(raw)
+    return body, title, candidates
+
+
 HORROR_LEVEL_INSTRUCTIONS = {
     1: "怖さレベル1（じんわり不気味）: 読後にわずかな違和感が残る程度。直接的な恐怖描写なし。",
     2: "怖さレベル2（ちょっと怖い）: 不気味な雰囲気・奇妙な出来事がある。直接的な恐怖は少ない。",
@@ -359,11 +376,38 @@ SEO_RULES = """
 - 記事の終盤で内容を軽く振り返り、関連する話題への興味を持たせる一文を入れる（読了率・回遊率を意識）
 """
 
+ARTICLE_WRITER_RULES = """
+【記事執筆の絶対ルール】
+■ 視点：解説者ではなく「目撃者」または「記録の発見者」として書け
+  - 「〜という説がある」「理由は〜だ」という第三者的な整理をするな
+  - 「見てしまった」「見つけてしまった」という一人称的な緊張感で書け
+  - 知識を伝えるのではなく、体験が滲み出るように書け
+
+■ 文章構造：整理整頓された論文構造を破壊せよ
+  - 「まず〜次に〜最後に」「〇つの理由」「まとめると」は禁止
+  - 情報は時系列や感情の流れで断片的に出てくるように配置する
+  - 段落は短く、息を切らしたようなリズムにする
+  - 「整理された記事」ではなく「震えた手で書いた記録」のように見せる
+
+■ タイトル：Googleの検索結果一覧に並んだ時に「クリックしないと今夜呪われそう」な不気味さを基準にする
+  - 必ず3案を【タイトル案】として出力し、その中から最もクリック率が高そうな1案を【タイトル】として選べ
+  - タイトルに「説明」を入れるな。「謎」「恐怖」「疑問」を投げかけろ
+  - 「〜の真相」「〜の正体」よりも「〜を見た夜から」「〜が届いてから」のような"体験の断片"で引け
+  - 固有名詞（地名・人名・事件名）を入れるとSEO的にも効く
+
+■ 有料ライン（TIPSペイウォール）の配置：
+  - 「全貌が見えた瞬間」の直前に切れ
+  - 読者が「あと一歩で全部わかる」と感じる瞬間、つまり謎の核心に触れる寸前で終わること
+  - 「〜だった。」で綺麗に終わるな。「〜だったとしたら」「〜だということを、私は——」のように
+    文章が途切れる・宙ぶらりんになる形で切れ
+  - この引きを甘くするな。ここで課金を諦めさせたら負けだ
+"""
+
 
 def generate_article(genre: str, idea: str, article_type: str, char_count: int = 3000,
                      include_story: bool = False, x_safe: bool = False,
-                     horror_level: int = 3) -> tuple[str, str]:
-    """記事本文とタイトルをtupleで返す。"""
+                     horror_level: int = 3) -> tuple[str, str, list]:
+    """記事本文・タイトル・タイトル候補3案をtupleで返す。"""
     genre_desc     = GENRE_DESCRIPTIONS.get(genre, genre)
     max_tokens     = min(8000, char_count * 2)
     policy         = X_POLICY_RULES if x_safe else ""
@@ -392,24 +436,28 @@ def generate_article(genre: str, idea: str, article_type: str, char_count: int =
 {ANTI_AI_RULES}
 {QUALITY_BOOST_RULES}
 {SEO_RULES}
+{ARTICLE_WRITER_RULES}
 {policy}
 {imi_rule}
 - 見出しはMarkdown（##）で書く
-- 読者を引き込む書き出しにする
 
 必ず以下のフォーマットで出力すること：
 
+【タイトル案】
+案1：（タイトル）
+案2：（タイトル）
+案3：（タイトル）
+
 【タイトル】
-（ここにタイトルを1行で書く）
+（上の3案の中から最もクリック率が高いと判断した1案をそのまま書く）
 
 【本文】
 （ここに記事本文を書く）"""
 
     raw = _call_claude(prompt, max_tokens=max_tokens)
-    body, title = _parse_title_and_body(raw)
-    # 下調べメモと照らし合わせて矛盾を修正（本文のみ対象）
+    body, title, candidates = _parse_article_with_candidates(raw)
     body = _consistency_check(body, research_memo, content_type=article_type)
-    return body, title
+    return body, title, candidates
 
 
 def generate_blog_post(
@@ -1282,7 +1330,10 @@ def generate_tips_pipeline(
 
 【各章の役割】
 第 1 章（無料）: 読者を引き込む最高密度の前半戦。日常の崩壊開始と最初の異変。
-第 2 章（無料）: 緊張感最大化。伏線を撒き、絶体絶命の引きで無料エリア終了。読者が課金せざるを得ない終わり方にする。
+  書き手は解説者ではなく「目撃者」または「記録の発見者」として書く。整理された説明文ではなく、体験が滲む断片的な語りにする。
+第 2 章（無料）: 緊張感最大化。伏線を撒き、「全貌が見える直前」で絶対に切る。
+  読者が「あと一歩で全部わかる」と感じる瞬間に終わること。「〜だった。」と綺麗に締めるな。
+  文章が途切れる・宙ぶらりんになる形で終わり、読者が金を払わずにいられない引きにする。ここを甘くしたら負けだ。
 第 3 章（有料）: 伏線回収開始。真相に迫る展開。怪異の正体・人間の本性が露わになる。
 第 4 章（有料）: 全伏線完全回収。強烈なオチ。AI っぽさ皆無の最高到達点。
 
@@ -1311,6 +1362,17 @@ def generate_tips_pipeline(
             "pending_clues"   : pending_clues,
         }, ensure_ascii=False)
 
+        is_paywall_chapter = (ch_num == 2)
+        paywall_instruction = """
+【有料ライン（ペイウォール）の引きの絶対ルール】
+この章はここで無料エリアが終わる。「全貌が見える直前」で切れ。
+- 読者が「あと一歩で全部わかる」と感じる瞬間に終わること
+- 「〜だった。」と綺麗に締めるな。文章が途切れる・宙ぶらりんになる形で終われ
+  例：「〜だということを、私は——」「〜だったとしたら、あの夜の」のように切れ
+- 謎の核心に触れる寸前で終わること。答えを1ミリも見せるな
+- ここで課金を諦めさせたら負けだ
+""" if is_paywall_chapter else ""
+
         write_prompt = f"""TIPS ホラー長編「{title}」の第 {ch_num} 章を書け。
 
 【直前の文脈（直前 500 字のみ — コンテキスト節約）】
@@ -1322,12 +1384,13 @@ def generate_tips_pipeline(
 【この章の役割】
 {ch_role}
 {f"【引きの指示】{ch_hook}" if ch_hook else ""}
-
+{paywall_instruction}
 【プロット参考】
 {plot_text}
 
 {ANTI_AI_RULES}
 {QUALITY_BOOST_RULES}
+{ARTICLE_WRITER_RULES}
 {genre_rules}
 {policy}
 
