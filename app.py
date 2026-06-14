@@ -33,6 +33,7 @@ from agents import (
     calc_horror_score, predict_viral_score,
     generate_catchcopy, generate_title_candidates,
     generate_text_thumbnail, batch_generate_posts,
+    generate_sns_one_shot, generate_tips_pipeline,
     STYLE_ROTATION,
 )
 from threads_api import post_to_threads
@@ -55,12 +56,16 @@ GENRES = [
     "心霊スポット（世界）",
     "意味がわかると怖い",
     "面白くて怖い（おも怖い）",
+    "王道ホラー（心霊）",    # v3.0 新設
+    "胸糞・ヒトコワ",        # v3.0 新設
 ]
 GENRE_DESC = {
     "都市伝説・未解決事件": "失踪・未解決事件・心霊スポットなど",
     "ホラー体験談・怪談":   "実話風の怖い体験・怪談・呪い",
     "不思議・オカルト・陰謀論": "超常現象・陰謀論・不思議な話",
     "サイコ・ダークな人間ドラマ": "狂気・ストーカー・ダークな人間関係",
+    "王道ホラー（心霊）": "五感の異常・日常の侵食・怪異の間接表現",
+    "胸糞・ヒトコワ": "人間の狂気・救いなし・幽霊なし",
 }
 STYLES = [
     "会話風", "独り言・日記風", "スレッド連投風", "ニュース・報告風",
@@ -86,6 +91,8 @@ GENRE_DESC = {
     "心霊スポット（世界）": "世界各地の心霊スポット・廃墟・呪われた場所",
     "意味がわかると怖い": "読んで意味がわかった瞬間に怖くなる話。答えは書かない",
     "面白くて怖い（おも怖い）": "笑えるのに最後に怖い。コメディ×ホラーの融合ジャンル",
+    "王道ホラー（心霊）": "五感の異常・日常の侵食・怪異の間接表現",
+    "胸糞・ヒトコワ": "人間の狂気・救いなし・幽霊なし",
 }
 
 HORROR_LEVEL_LABELS = {
@@ -561,6 +568,14 @@ with tab_post:
                 st.caption(f"「{sel_profile}」の演出技法を参考に生成します")
 
         st.markdown("### STEP 4　生成する")
+        one_shot_mode = st.toggle(
+            "⚡ 高速1ショットモード（GPT-4o）",
+            value=False, key="post_one_shot_mode",
+            help="GPT-4oで200〜260字に最適化した投稿文を超高速生成。文字数スライダーは無効になります。",
+        )
+        if one_shot_mode:
+            st.caption("⚡ GPT-4o使用 / 200〜260字固定 / 断定口調・ゾワッとするオチ必須")
+
         generate_btn = st.button(
             "🔥 投稿文を生成する",
             type="primary", key="post_generate", use_container_width=True,
@@ -577,7 +592,13 @@ with tab_post:
             else:
                 with st.spinner("AIが文章を考えています...（10〜20秒）"):
                     try:
-                        if ab_mode:
+                        if one_shot_mode:
+                            content = generate_sns_one_shot(genre, style, idea_text, get_x_safe())
+                            st.session_state.update({
+                                "post_content": content, "post_pending": content,
+                                "post_score": calc_quality_score(content), "ab_content_a": None,
+                            })
+                        elif ab_mode:
                             ca, cb = generate_ab_pair(genre, idea_text, style, style_b, char_count, get_x_safe())
                             st.session_state.update({
                                 "ab_content_a": ca, "ab_content_b": cb,
@@ -816,30 +837,68 @@ with tab_novel:
         if genre_n == "意味がわかると怖い":
             st.info("💡 意味がわかると怖いジャンル：表面上は普通の話として書き、意味がわかった瞬間に怖くなる構造にします。")
 
-        with st.expander("💰 収益化オプション（任意）"):
-            note_url_n = st.text_input("noteのURL", key="novel_note_url")
-            aff_url_n  = st.text_input("アフィリエイトURL", key="novel_aff_url")
+        st.markdown("---")
+        tips_mode_n = st.toggle("💰 TIPSモード（アフィリエイト50%最適化）", False, key="novel_tips_mode",
+                                help="ch1-2を無料公開・ch3-4を有料に分割し、50%報酬アフィリエイト用コピペキットを自動生成します")
 
-        if st.button(f"🔥 小説を生成する（約{novel_chars_input:,}字）",
-                     type="primary", key="novel_generate", use_container_width=True, disabled=not api_key_set()):
-            if not require_api_key():
-                pass
-            elif not idea_text_n.strip():
-                st.error("⚠️ ネタを入力してください")
-            else:
-                with st.spinner(f"小説を書いています...（{novel_chars_input:,}字・数分かかります）"):
-                    try:
-                        cn, title_n = generate_novel(genre_n, idea_text_n, novel_chars_input, x_safe=get_x_safe(), style_hint=style_hint_n, horror_level=horror_level_n)
-                        if note_url_n or aff_url_n:
-                            cn = add_monetization(cn, "novel", aff_url_n, note_url_n)
-                        st.session_state.update({"novel_content": cn, "novel_pending": cn,
-                                                  "novel_score": calc_quality_score(cn), "novel_title": title_n, "novel_title_candidates": []})
-                        if selected_idea_n:
-                            db.mark_idea_used(selected_idea_n["id"])
-                        db.save_content("novel", genre_n, "", cn, st.session_state["novel_score"])
-                        st.toast("✅ 小説が完成しました！右側を確認してください", icon="📖")
-                    except Exception as e:
-                        logger.error(f"Novel error: {e}"); st.error(f"生成エラー: {e}")
+        if tips_mode_n:
+            tips_url_n = st.text_input("TIPSのURL（アフィリエイトリンク）", placeholder="https://tips.cash/...", key="novel_tips_url")
+            st.info("📝 4章構成（各約1,200字）で自動生成されます。ch1-2が無料公開エリア、ch3-4が有料限定エリアです。")
+        else:
+            with st.expander("💰 収益化オプション（任意）"):
+                note_url_n = st.text_input("noteのURL", key="novel_note_url")
+                aff_url_n  = st.text_input("アフィリエイトURL", key="novel_aff_url")
+
+        if tips_mode_n:
+            if st.button("🔥 TIPSコンテンツを生成する（4章構成・約4,800字）",
+                         type="primary", key="novel_tips_generate", use_container_width=True, disabled=not api_key_set()):
+                if not require_api_key():
+                    pass
+                elif not idea_text_n.strip():
+                    st.error("⚠️ ネタを入力してください")
+                else:
+                    with st.spinner("4章構成で書いています...（数分かかります）"):
+                        try:
+                            tips_url_val = st.session_state.get("novel_tips_url", "")
+                            result = generate_tips_pipeline(genre_n, idea_text_n, tips_url=tips_url_val,
+                                                            x_safe=get_x_safe(), horror_level=horror_level_n)
+                            full_text = result["free_part"] + "\n\n" + result["paid_part"]
+                            st.session_state.update({
+                                "novel_content": full_text,
+                                "novel_score": calc_quality_score(full_text),
+                                "novel_title": result["title"],
+                                "novel_title_candidates": [],
+                                "tips_result": result,
+                                "tips_mode_active": True,
+                            })
+                            if selected_idea_n:
+                                db.mark_idea_used(selected_idea_n["id"])
+                            db.save_content("novel", genre_n, result["title"], full_text, st.session_state["novel_score"])
+                            st.toast("✅ TIPSコンテンツが完成しました！", icon="💰")
+                        except Exception as e:
+                            logger.error(f"TIPS error: {e}"); st.error(f"生成エラー: {e}")
+        else:
+            st.session_state["tips_mode_active"] = False
+            if st.button(f"🔥 小説を生成する（約{novel_chars_input:,}字）",
+                         type="primary", key="novel_generate", use_container_width=True, disabled=not api_key_set()):
+                if not require_api_key():
+                    pass
+                elif not idea_text_n.strip():
+                    st.error("⚠️ ネタを入力してください")
+                else:
+                    with st.spinner(f"小説を書いています...（{novel_chars_input:,}字・数分かかります）"):
+                        try:
+                            cn, title_n = generate_novel(genre_n, idea_text_n, novel_chars_input, x_safe=get_x_safe(), style_hint=style_hint_n, horror_level=horror_level_n)
+                            if st.session_state.get("novel_note_url") or st.session_state.get("novel_aff_url"):
+                                cn = add_monetization(cn, "novel", st.session_state.get("novel_aff_url", ""), st.session_state.get("novel_note_url", ""))
+                            st.session_state.update({"novel_content": cn, "novel_pending": cn,
+                                                      "novel_score": calc_quality_score(cn), "novel_title": title_n, "novel_title_candidates": []})
+                            if selected_idea_n:
+                                db.mark_idea_used(selected_idea_n["id"])
+                            db.save_content("novel", genre_n, "", cn, st.session_state["novel_score"])
+                            st.toast("✅ 小説が完成しました！右側を確認してください", icon="📖")
+                        except Exception as e:
+                            logger.error(f"Novel error: {e}"); st.error(f"生成エラー: {e}")
         if not api_key_set():
             st.caption("⚠️ サイドバーでAPIキーを設定してください")
 
@@ -848,7 +907,51 @@ with tab_novel:
         sn = st.session_state.get("novel_score", 0.0)
         if not st.session_state.get("novel_content"):
             st.markdown('<div class="empty-state"><div style="font-size:3rem">📖</div><div>左で設定して「小説を生成する」を押してください</div></div>', unsafe_allow_html=True)
+        elif st.session_state.get("tips_mode_active") and st.session_state.get("tips_result"):
+            # ── TIPSモード 分割プレビュー ──
+            tips_res = st.session_state["tips_result"]
+            if sn:
+                st.markdown(f'<div class="quality-score {score_color_class(sn)}">品質スコア: {sn:.0f}点</div>', unsafe_allow_html=True)
+            tips_title = tips_res.get("title", "")
+            if tips_title:
+                edited_tips_title = st.text_input("📌 タイトル（編集可能）", value=tips_title, key="tips_title_input")
+                if st.button("📋 タイトルをコピー", key="tips_copy_title", use_container_width=True):
+                    copy_to_clipboard(edited_tips_title); st.success("コピーしました！")
+
+            st.markdown("---")
+            st.markdown("#### 🔓 無料公開エリア（第1〜2章）")
+            st.caption("TIPSの前半部分です。ここまでを無料公開に設定してください。")
+            edited_free = st.text_area("無料エリア（編集可能）", value=tips_res.get("free_part", ""),
+                                       height=250, key="tips_free_preview")
+            if st.button("📋 無料エリアをコピー", key="tips_copy_free", use_container_width=True):
+                copy_to_clipboard(edited_free); st.success("コピーしました！")
+
+            st.markdown("---")
+            st.markdown("#### 🛑 TIPS有料ライン（ここから下を有料エリアに設定）")
+            st.markdown("---")
+
+            st.markdown("#### 🔒 有料限定エリア（第3〜4章）")
+            st.caption("ここから下をTIPSの有料部分に設定してください。")
+            edited_paid = st.text_area("有料エリア（編集可能）", value=tips_res.get("paid_part", ""),
+                                       height=250, key="tips_paid_preview")
+            if st.button("📋 有料エリアをコピー", key="tips_copy_paid", use_container_width=True):
+                copy_to_clipboard(edited_paid); st.success("コピーしました！")
+
+            st.markdown("---")
+            st.markdown("#### 🎁 50%報酬アフィリエイト用拡散コピペキット")
+            st.caption("購入者がSNSで紹介する際のテンプレートです。3パターン自動生成されています。")
+            aff_kit = tips_res.get("affiliate_kit", "")
+            st.text_area("コピペキット", value=aff_kit, height=200, key="tips_aff_kit_display")
+            if st.button("📋 コピペキットをまとめてコピー", key="tips_copy_kit", use_container_width=True):
+                copy_to_clipboard(aff_kit); st.success("コピーしました！")
+
+            st.markdown("---")
+            full_text_tips = edited_free + "\n\n" + edited_paid
+            st.caption(f"総文字数: {len(full_text_tips):,}字 　無料: {len(edited_free):,}字 　有料: {len(edited_paid):,}字")
+            if st.button("📅 スケジュールに追加", key="tips_novel_queue", use_container_width=True):
+                db.add_to_queue("novel", genre_n, tips_title, full_text_tips, "", sn); st.success("追加しました！")
         else:
+            # ── 通常モード プレビュー ──
             if sn:
                 st.markdown(f'<div class="quality-score {score_color_class(sn)}">品質スコア: {sn:.0f}点</div>', unsafe_allow_html=True)
             novel_title = st.session_state.get("novel_title", "")
@@ -946,30 +1049,67 @@ with tab_article:
         if genre_a == "意味がわかると怖い":
             st.info("💡 意味がわかると怖いジャンル：表面上は普通の記事として書き、意味がわかった瞬間に怖くなる構造にします。")
 
-        with st.expander("💰 収益化オプション（任意）"):
-            note_url_a = st.text_input("noteのURL", key="article_note_url")
-            aff_url_a  = st.text_input("アフィリエイトURL", key="article_aff_url")
+        st.markdown("---")
+        tips_mode_a = st.toggle("💰 TIPSモード（アフィリエイト50%最適化）", False, key="article_tips_mode",
+                                help="ch1-2を無料公開・ch3-4を有料に分割し、50%報酬アフィリエイト用コピペキットを自動生成します")
 
-        if st.button(f"🔥 記事を生成する（約{article_chars_input:,}字）",
-                     type="primary", key="article_generate", use_container_width=True, disabled=not api_key_set()):
-            if not require_api_key():
-                pass
-            elif not idea_text_a.strip():
-                st.error("⚠️ ネタを入力してください")
-            else:
-                with st.spinner(f"記事を書いています...（{article_chars_input:,}字・数分かかります）"):
-                    try:
-                        ca, title_a = generate_article(genre_a, idea_text_a, article_type, article_chars_input, include_story, x_safe=get_x_safe(), horror_level=horror_level_a)
-                        if note_url_a or aff_url_a:
-                            ca = add_monetization(ca, "article", aff_url_a, note_url_a)
-                        st.session_state.update({"article_content": ca, "article_pending": ca,
-                                                  "article_score": calc_quality_score(ca), "article_title": title_a})
-                        if selected_idea_a:
-                            db.mark_idea_used(selected_idea_a["id"])
-                        db.save_content("article", genre_a, article_type, ca, st.session_state["article_score"])
-                        st.toast("✅ 記事が完成しました！右側を確認してください", icon="📰")
-                    except Exception as e:
-                        logger.error(f"Article error: {e}"); st.error(f"生成エラー: {e}")
+        if tips_mode_a:
+            tips_url_a = st.text_input("TIPSのURL（アフィリエイトリンク）", placeholder="https://tips.cash/...", key="article_tips_url")
+            st.info("📝 4章構成（各約1,200字）で自動生成されます。")
+        else:
+            with st.expander("💰 収益化オプション（任意）"):
+                note_url_a = st.text_input("noteのURL", key="article_note_url")
+                aff_url_a  = st.text_input("アフィリエイトURL", key="article_aff_url")
+
+        if tips_mode_a:
+            if st.button("🔥 TIPSコンテンツを生成する（4章構成・約4,800字）",
+                         type="primary", key="article_tips_generate", use_container_width=True, disabled=not api_key_set()):
+                if not require_api_key():
+                    pass
+                elif not idea_text_a.strip():
+                    st.error("⚠️ ネタを入力してください")
+                else:
+                    with st.spinner("4章構成で書いています...（数分かかります）"):
+                        try:
+                            tips_url_val_a = st.session_state.get("article_tips_url", "")
+                            result_a = generate_tips_pipeline(genre_a, idea_text_a, tips_url=tips_url_val_a,
+                                                              x_safe=get_x_safe(), horror_level=horror_level_a)
+                            full_text_a = result_a["free_part"] + "\n\n" + result_a["paid_part"]
+                            st.session_state.update({
+                                "article_content": full_text_a,
+                                "article_score": calc_quality_score(full_text_a),
+                                "article_title": result_a["title"],
+                                "tips_result_a": result_a,
+                                "tips_mode_active_a": True,
+                            })
+                            if selected_idea_a:
+                                db.mark_idea_used(selected_idea_a["id"])
+                            db.save_content("article", genre_a, article_type, full_text_a, st.session_state["article_score"])
+                            st.toast("✅ TIPSコンテンツが完成しました！", icon="💰")
+                        except Exception as e:
+                            logger.error(f"TIPS article error: {e}"); st.error(f"生成エラー: {e}")
+        else:
+            st.session_state["tips_mode_active_a"] = False
+            if st.button(f"🔥 記事を生成する（約{article_chars_input:,}字）",
+                         type="primary", key="article_generate", use_container_width=True, disabled=not api_key_set()):
+                if not require_api_key():
+                    pass
+                elif not idea_text_a.strip():
+                    st.error("⚠️ ネタを入力してください")
+                else:
+                    with st.spinner(f"記事を書いています...（{article_chars_input:,}字・数分かかります）"):
+                        try:
+                            ca, title_a = generate_article(genre_a, idea_text_a, article_type, article_chars_input, include_story, x_safe=get_x_safe(), horror_level=horror_level_a)
+                            if st.session_state.get("article_note_url") or st.session_state.get("article_aff_url"):
+                                ca = add_monetization(ca, "article", st.session_state.get("article_aff_url", ""), st.session_state.get("article_note_url", ""))
+                            st.session_state.update({"article_content": ca, "article_pending": ca,
+                                                      "article_score": calc_quality_score(ca), "article_title": title_a})
+                            if selected_idea_a:
+                                db.mark_idea_used(selected_idea_a["id"])
+                            db.save_content("article", genre_a, article_type, ca, st.session_state["article_score"])
+                            st.toast("✅ 記事が完成しました！右側を確認してください", icon="📰")
+                        except Exception as e:
+                            logger.error(f"Article error: {e}"); st.error(f"生成エラー: {e}")
         if not api_key_set():
             st.caption("⚠️ サイドバーでAPIキーを設定してください")
 
@@ -978,7 +1118,48 @@ with tab_article:
         sa = st.session_state.get("article_score", 0.0)
         if not st.session_state.get("article_content"):
             st.markdown('<div class="empty-state"><div style="font-size:3rem">📰</div><div>左で設定して「記事を生成する」を押してください</div></div>', unsafe_allow_html=True)
+        elif st.session_state.get("tips_mode_active_a") and st.session_state.get("tips_result_a"):
+            # ── TIPSモード 分割プレビュー（記事） ──
+            tips_res_a = st.session_state["tips_result_a"]
+            if sa:
+                st.markdown(f'<div class="quality-score {score_color_class(sa)}">品質スコア: {sa:.0f}点</div>', unsafe_allow_html=True)
+            tips_title_a = tips_res_a.get("title", "")
+            if tips_title_a:
+                edited_tips_title_a = st.text_input("📌 タイトル（編集可能）", value=tips_title_a, key="tips_article_title_input")
+                if st.button("📋 タイトルをコピー", key="tips_article_copy_title", use_container_width=True):
+                    copy_to_clipboard(edited_tips_title_a); st.success("コピーしました！")
+
+            st.markdown("---")
+            st.markdown("#### 🔓 無料公開エリア（第1〜2章）")
+            edited_free_a = st.text_area("無料エリア（編集可能）", value=tips_res_a.get("free_part", ""),
+                                         height=250, key="tips_article_free_preview")
+            if st.button("📋 無料エリアをコピー", key="tips_article_copy_free", use_container_width=True):
+                copy_to_clipboard(edited_free_a); st.success("コピーしました！")
+
+            st.markdown("---")
+            st.markdown("#### 🛑 TIPS有料ライン（ここから下を有料エリアに設定）")
+            st.markdown("---")
+
+            st.markdown("#### 🔒 有料限定エリア（第3〜4章）")
+            edited_paid_a = st.text_area("有料エリア（編集可能）", value=tips_res_a.get("paid_part", ""),
+                                         height=250, key="tips_article_paid_preview")
+            if st.button("📋 有料エリアをコピー", key="tips_article_copy_paid", use_container_width=True):
+                copy_to_clipboard(edited_paid_a); st.success("コピーしました！")
+
+            st.markdown("---")
+            st.markdown("#### 🎁 50%報酬アフィリエイト用拡散コピペキット")
+            aff_kit_a = tips_res_a.get("affiliate_kit", "")
+            st.text_area("コピペキット", value=aff_kit_a, height=200, key="tips_article_aff_kit_display")
+            if st.button("📋 コピペキットをまとめてコピー", key="tips_article_copy_kit", use_container_width=True):
+                copy_to_clipboard(aff_kit_a); st.success("コピーしました！")
+
+            st.markdown("---")
+            full_text_tips_a = edited_free_a + "\n\n" + edited_paid_a
+            st.caption(f"総文字数: {len(full_text_tips_a):,}字 　無料: {len(edited_free_a):,}字 　有料: {len(edited_paid_a):,}字")
+            if st.button("📅 スケジュールに追加", key="tips_article_queue", use_container_width=True):
+                db.add_to_queue("article", genre_a, tips_title_a, full_text_tips_a, "", sa); st.success("追加しました！")
         else:
+            # ── 通常モード プレビュー（記事） ──
             if sa:
                 st.markdown(f'<div class="quality-score {score_color_class(sa)}">品質スコア: {sa:.0f}点</div>', unsafe_allow_html=True)
             article_title = st.session_state.get("article_title", "")

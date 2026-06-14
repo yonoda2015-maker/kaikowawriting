@@ -25,6 +25,8 @@ GENRE_DESCRIPTIONS = {
     "心霊スポット（世界）": "世界各地の有名心霊スポット・廃墟・呪われた場所",
     "意味がわかると怖い": "読んだときは普通だが、意味を理解した瞬間に恐怖が来る話",
     "面白くて怖い（おも怖い）": "笑えるのに怖い・怖いのに笑える。コメディとホラーの融合",
+    "王道ホラー（心霊）": "五感の異常・日常の侵食。怪異の姿を見せず恐怖を醸成する王道心霊",
+    "胸糞・ヒトコワ": "幽霊なし。人間の執着・狂気・善意を装う悪意。救いのない後味の悪さ",
 }
 
 # 意味がわかると怖いジャンル専用ルール
@@ -85,12 +87,23 @@ X_POLICY_RULES = """
 ANTI_AI_RULES = """
 【絶対ルール】
 - 断定口調（〜だ、〜した、〜だった）のみ使う
-- 「実は」「なんと」「驚くことに」「まとめると」「つまり」は使わない
-- 「〜でしょう」「〜かもしれません」などの曖昧表現は使わない
+- 「実は」「なんと」「驚くことに」「まとめると」「つまり」「でしょう」「かもしれません」は一切使わない（品質スコアで大幅減点される）
 - 綺麗にまとめない。オチは説明せずに感じさせる
 - 実話風の語り口を徹底する
 - 起承転結＋最後にゾワッとするオチを必ず入れる
 - 文章を美化しない
+"""
+
+# 品質スコア（app.pyのcalc_quality_score）で高得点を取るための執筆ガイド。
+# スコアは「1文の平均長15〜50字」「不気味な語彙の密度」「AIっぽい言い回しの不在」を見ているため、
+# 生成段階でこれを満たす文章にしておくと再生成の手戻りが減る。
+QUALITY_BOOST_RULES = """
+【高品質スコアを取るための文章作法】
+- 1文を15〜50字程度に保つ。だらだら長い一文や、極端に短い一文の連続を避ける
+- 句点（。）でこまめに文を区切り、リズムを作る
+- 文章全体に「死」「消えた」「気づいた」「振り返ると」「声」「影」「血」「冷たい」「震」「息」のような
+  感覚や気配を表す語を自然に複数回散りばめる（無理に詰め込まず、情景描写の中で使う）
+- 説明的な「〜だと思う」ではなく「〜だった」と言い切ることでリズムと不気味さを両立させる
 """
 
 
@@ -167,6 +180,65 @@ def _get_horror_level_instruction(horror_level: int) -> str:
     return HORROR_LEVEL_INSTRUCTIONS.get(horror_level, "")
 
 
+def _research_idea(idea: str, genre: str, content_type: str = "投稿") -> str:
+    """
+    書き出す前の下調べ。登場人物・場所・時系列など、文章全体で
+    一貫させるべき設定をメモとして整理する。これを執筆プロンプトに
+    渡すことで、後段の整合性チェックの基準にもなる。
+    """
+    prompt = f"""これから「{content_type}」を書く。本文を書く前の下調べとして、
+次のネタについて整理せよ。
+
+ネタ：{idea}
+ジャンル：{genre}
+
+以下の項目を簡潔に箇条書きで整理せよ（本文は書かないこと）：
+- 登場人物・場所・組織名など、文章に出てくる固有名詞とその設定
+- 時系列（いつ、どんな順番で何が起きるか）
+- ジャンル的に外せない要素、矛盾が起きやすいポイント
+- 実話風に見せるために抑えておくべきリアリティのディテール（年代・地名・状況など）
+
+下調べメモだけを出力すること。説明や前置きは不要。"""
+    try:
+        return _call_claude(prompt, max_tokens=600)
+    except Exception as e:
+        logger.warning(f"下調べ生成に失敗（スキップして続行）: {e}")
+        return ""
+
+
+def _consistency_check(text: str, research_memo: str, content_type: str = "投稿") -> str:
+    """
+    下調べメモと本文を照らし合わせ、名前・時系列・設定の矛盾を修正する。
+    矛盾がなければ本文をそのまま返す。
+    """
+    if not research_memo:
+        return text
+
+    prompt = f"""以下は「{content_type}」の本文と、執筆前に作成した下調べメモだ。
+本文を下調べメモと照らし合わせ、矛盾点があれば修正した最終版を出力せよ。
+
+【下調べメモ】
+{research_memo}
+
+【本文】
+{text}
+
+チェック項目：
+- 登場人物の名前・年齢・関係性が文章全体で一貫しているか
+- 場所・時間・時系列に矛盾がないか
+- 途中で設定が変わっていないか
+- 文体・スタイルが一貫しているか
+
+矛盾がなければ本文をそのまま、矛盾があれば修正済みの本文を出力すること。
+説明・前置き・チェック結果のコメントは一切不要。本文だけを出力すること。"""
+
+    try:
+        return _call_claude(prompt, max_tokens=max(1200, len(text) * 2))
+    except Exception as e:
+        logger.warning(f"整合性チェックに失敗（元の本文を使用）: {e}")
+        return text
+
+
 def generate_post(genre: str, style: str, idea: str, char_count: int = 300,
                   x_safe: bool = False, horror_level: int = 3) -> str:
     # 入力サニタイズ
@@ -184,6 +256,10 @@ def generate_post(genre: str, style: str, idea: str, char_count: int = 300,
     # 意味がわかると怖いジャンル専用ルール
     imi_rule   = IMI_KOWAI_RULES if genre == "意味がわかると怖い" else (OMO_KOWAI_RULES if genre == "面白くて怖い（おも怖い）" else "")
 
+    # 書き出す前に下調べを行い、設定の一貫性の土台を作る
+    research_memo = _research_idea(idea, genre, content_type="投稿")
+    memo_block = f"\n【下調べメモ（これを踏まえて矛盾なく書くこと）】\n{research_memo}\n" if research_memo else ""
+
     prompt = f"""以下の条件でSNS投稿文を書け。
 
 ジャンル：{genre}（{genre_desc}）
@@ -191,13 +267,33 @@ def generate_post(genre: str, style: str, idea: str, char_count: int = 300,
 ネタ：{idea}
 目標文字数：約{char_count}字
 {level_inst}
-
+{memo_block}
 {ANTI_AI_RULES}
+{QUALITY_BOOST_RULES}
 {policy}
 {imi_rule}
 投稿文だけを出力すること。説明・前置き・タイトルは不要。"""
 
-    return _call_claude(prompt, max_tokens=1000)
+    draft = _call_claude(prompt, max_tokens=1000)
+    # 下調べメモと照らし合わせて矛盾を修正
+    return _consistency_check(draft, research_memo, content_type="投稿")
+
+
+# 小説生成でSEOを意識させるためのガイド
+# X記事・noteへの掲載が前提だが、X記事はGoogle検索結果にも表示されるため、
+# 検索エンジン経由の流入も意識したタイトル・書き出しが必要になった。
+NOVEL_SEO_RULES = """
+【Google検索・流入を意識したタイトル・書き出し】
+※ X（旧Twitter）の記事はGoogleの検索結果に表示されるため、SNS内だけでなく
+　検索エンジン経由でたどり着く読者にも刺さるタイトル・書き出しにすること。
+- タイトルは検索結果の見出しとして表示される前提で、検索されやすいキーワード
+  （地名・職業・関係性・「実話」「体験談」「怖い話」など）をできるだけ前方に含めつつ、
+  内容の核心を明かしすぎない「続きが気になる」具体性（数字・固有名詞・状況）を入れる
+- 書き出しの2〜3文は検索結果のスニペットとして抜粋される可能性があるため、
+  「どんな話か」「なぜ読むべきか」が一目で伝わるように書き、検索や見出しから来た読者を逃さない
+- 同じ言葉や表現を繰り返しすぎず、関連語・言い換えを使って単調さを避ける（不自然なキーワードの詰め込みは避ける）
+- 章や場面の切れ目がある場合は、次が気になる引きで終える（離脱防止・回遊率を意識）
+"""
 
 
 def generate_novel(genre: str, idea: str, char_count: int = 3000,
@@ -210,14 +306,20 @@ def generate_novel(genre: str, idea: str, char_count: int = 3000,
     level_inst = _get_horror_level_instruction(horror_level)
     imi_rule   = IMI_KOWAI_RULES if genre == "意味がわかると怖い" else (OMO_KOWAI_RULES if genre == "面白くて怖い（おも怖い）" else "")
 
+    # 小説は長文ほど矛盾が起きやすいため、下調べメモを必ず作って一貫性の土台にする
+    research_memo = _research_idea(idea, genre, content_type="短編小説")
+    memo_block = f"\n【下調べメモ（これを踏まえて矛盾なく書くこと）】\n{research_memo}\n" if research_memo else ""
+
     prompt = f"""以下の条件でこわ面白い短編小説を書け。
 
 ジャンル：{genre}（{genre_desc}）
 ネタ：{idea}
 目標文字数：約{char_count}字
 {level_inst}
-
+{memo_block}
 {ANTI_AI_RULES}
+{QUALITY_BOOST_RULES}
+{NOVEL_SEO_RULES}
 {policy}
 {style_hint}
 {imi_rule}
@@ -233,7 +335,29 @@ def generate_novel(genre: str, idea: str, char_count: int = 3000,
 （ここに小説本文を書く）"""
 
     raw = _call_claude(prompt, max_tokens=max_tokens)
-    return _parse_title_and_body(raw)
+    body, title = _parse_title_and_body(raw)
+    # 下調べメモと照らし合わせて矛盾を修正（本文のみ対象）
+    body = _consistency_check(body, research_memo, content_type="短編小説")
+    return body, title
+
+
+# 記事生成でSEOを意識させるためのガイド
+# X（旧Twitter）の記事はGoogle検索結果に表示されるようになったため、
+# Google検索からの流入を前提としたSEO対策が必要になった。
+SEO_RULES = """
+【Google検索を意識したSEOの書き方】
+※ X（旧Twitter）の記事はGoogleの検索結果に表示されるため、SNS内の閲覧者だけでなく
+　検索エンジン経由の読者にも届く前提で書くこと。
+- タイトルは検索結果の見出し（タイトルタグ）として表示されることを意識し、
+  検索されやすいキーワード（地名・固有名詞・「都市伝説」「心霊」「未解決事件」「怖い話」など）を
+  できるだけ前方に含めつつ、クリックしたくなる具体性（数字・固有名詞・問いかけ）を入れる
+- 記事冒頭の2〜3文は検索結果のスニペット（説明文）として抜粋表示される可能性が高いため、
+  「この記事に何が書いてあるか」「読者の知りたいことに答える内容か」が一目で伝わるように書く
+- 見出し（##）には記事の主要キーワード・関連語を自然に含め、検索ユーザーが知りたい情報の流れに沿って構成する
+- 同じキーワードを不自然に詰め込まず、関連語・言い換えも交えて自然な文章にする（過剰な詰め込みはSEO的に逆効果）
+- 検索意図に対する答えを記事内できちんと完結させ、関連トピックへの言及で内容の網羅性を高める
+- 記事の終盤で内容を軽く振り返り、関連する話題への興味を持たせる一文を入れる（読了率・回遊率を意識）
+"""
 
 
 def generate_article(genre: str, idea: str, article_type: str, char_count: int = 3000,
@@ -252,6 +376,10 @@ def generate_article(genre: str, idea: str, article_type: str, char_count: int =
         "解説記事": "オカルト・陰謀論などを深掘り解説する読み物",
     }.get(article_type, article_type)
 
+    # 記事は事実関係や固有名詞の矛盾が目立ちやすいため、下調べを必ず挟む
+    research_memo = _research_idea(idea, genre, content_type=f"{article_type}")
+    memo_block = f"\n【下調べメモ（これを踏まえて矛盾なく書くこと）】\n{research_memo}\n" if research_memo else ""
+
     prompt = f"""以下の条件でWeb記事を書け。
 
 記事種類：{article_type}（{article_type_desc}）
@@ -260,8 +388,10 @@ def generate_article(genre: str, idea: str, article_type: str, char_count: int =
 目標文字数：約{char_count}字
 {level_inst}
 {story_instruction}
-
+{memo_block}
 {ANTI_AI_RULES}
+{QUALITY_BOOST_RULES}
+{SEO_RULES}
 {policy}
 {imi_rule}
 - 見出しはMarkdown（##）で書く
@@ -276,7 +406,10 @@ def generate_article(genre: str, idea: str, article_type: str, char_count: int =
 （ここに記事本文を書く）"""
 
     raw = _call_claude(prompt, max_tokens=max_tokens)
-    return _parse_title_and_body(raw)
+    body, title = _parse_title_and_body(raw)
+    # 下調べメモと照らし合わせて矛盾を修正（本文のみ対象）
+    body = _consistency_check(body, research_memo, content_type=article_type)
+    return body, title
 
 
 def generate_blog_post(
@@ -938,4 +1071,352 @@ def batch_generate_posts(genre: str, idea: str, styles: list[str],
                             "score": 0.0})  # スコアはapp側で計算
         except Exception as e:
             results.append({"style": style, "content": f"生成エラー: {e}", "score": 0.0})
+    return results
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# v3.0: ハイブリッド生成アーキテクチャ
+# ─ A) SNS 1ショット（GPT-4o）
+# ─ B) TIPS長編パイプライン（Claude + スライディングウィンドウ）
+# ═══════════════════════════════════════════════════════════════════════
+
+from pathlib import Path as _Path
+
+# ── config ローダー ──────────────────────────────────────────────────
+
+def _load_genre_config(genre_id: str) -> dict:
+    """config/genres/{genre_id}.json を読み込む。存在しない場合は空 dict を返す。"""
+    path = _Path(__file__).parent / "config" / "genres" / f"{genre_id}.json"
+    if path.exists():
+        return json.loads(path.read_text(encoding="utf-8"))
+    return {}
+
+
+def _load_format_config(format_id: str) -> dict:
+    """config/formats/{format_id}.json を読み込む。存在しない場合は空 dict を返す。"""
+    path = _Path(__file__).parent / "config" / "formats" / f"{format_id}.json"
+    if path.exists():
+        return json.loads(path.read_text(encoding="utf-8"))
+    return {}
+
+
+# ジャンル名 → config ファイル ID のマッピング
+_GENRE_CONFIG_MAP = {
+    "王道ホラー（心霊）":        "pure_horror",
+    "胸糞・ヒトコワ":            "dark_human",
+    "意味がわかると怖い":         "imi_kowai",
+    "面白くて怖い（おも怖い）":   "omo_kowai",
+}
+
+
+def _get_genre_extra_rules(genre: str) -> str:
+    """ジャンルに対応する config JSON を読み込み、プロンプト注入用のルール文字列を返す。"""
+    genre_id = _GENRE_CONFIG_MAP.get(genre)
+    if not genre_id:
+        return ""
+    cfg = _load_genre_config(genre_id)
+    if not cfg:
+        return ""
+    parts: list[str] = []
+    rules    = cfg.get("system_rules", [])
+    forbidden = cfg.get("forbidden", [])
+    required  = cfg.get("required_elements", [])
+    label     = cfg.get("label", genre)
+    if rules:
+        parts.append(f"【{label}専用ルール】")
+        parts.extend(f"- {r}" for r in rules)
+    if forbidden:
+        parts.append(f"禁止要素: {', '.join(forbidden)}")
+    if required:
+        parts.append(f"必須要素: {', '.join(required)}")
+    return "\n".join(parts)
+
+
+# ── A) SNS 1ショット生成（GPT-4o） ──────────────────────────────────
+
+def generate_sns_one_shot(genre: str, style: str, elements: str,
+                           x_safe: bool = False) -> str:
+    """
+    GPT-4o による 280 字以内 SNS 投稿の高速 1 ショット生成。
+
+    マルチエージェントをバイパスし、JSON {"post_text": "..."} を
+    1 回のリクエストで取得する。
+    出力トークン枠を 200〜260 字に強制制限することで
+    モデルの余計な補足・解説（AI 臭さ）を物理的に封じ込める。
+    """
+    from openai import OpenAI as _OpenAI
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY が設定されていません。サイドバーで入力してください。")
+
+    client = _OpenAI(api_key=api_key)
+
+    genre_desc   = GENRE_DESCRIPTIONS.get(genre, genre)
+    style_desc   = STYLE_DESCRIPTIONS.get(style, style)
+    genre_rules  = _get_genre_extra_rules(genre)
+    policy       = X_POLICY_RULES if x_safe else ""
+
+    # SNS フォーマット設定から禁止語を取得
+    sns_cfg      = _load_format_config("sns_short")
+    forbidden_words = sns_cfg.get("constraints", {}).get("forbidden_words", [
+        "実は", "なんと", "驚くことに", "まとめると", "つまり",
+        "でしょう", "かもしれません",
+    ])
+    forbidden_str = "・".join(forbidden_words)
+
+    prompt = f"""以下の条件で SNS 投稿文を 1 つ生成せよ。
+
+ジャンル：{genre}（{genre_desc}）
+スタイル：{style}（{style_desc}）
+要素・ネタ：{elements}
+
+【厳守事項 — 1 項目でも違反したら不合格】
+- 文字数：200 字以上 260 字以下（空白・改行を含めて計測）
+- 断定口調（〜だ・〜した・〜だった）のみ使う
+- 絶対禁止ワード（1 語でも含めば即不合格）：{forbidden_str}
+- 綺麗にまとめない・オチは説明せず感じさせる
+- 起承転結 ＋ 最後にゾワッとするオチを入れる
+
+{genre_rules}
+{policy}
+
+出力形式：以下の JSON のみ。説明文・マークダウン・コードブロック不要。
+{{"post_text": "（投稿文 200〜260 字）"}}"""
+
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        response_format={"type": "json_object"},
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=600,
+        temperature=0.9,
+    )
+
+    raw      = response.choices[0].message.content
+    data     = json.loads(raw)
+    post_text = data.get("post_text", "").strip()
+
+    char_len = len(post_text)
+    if char_len < 200:
+        logger.warning(f"SNS 1 ショット: 文字数不足 ({char_len} 字)")
+    elif char_len > 280:
+        logger.warning(f"SNS 1 ショット: 文字数超過 ({char_len} 字)")
+    else:
+        logger.info(f"SNS 1 ショット: 生成完了 ({char_len} 字)")
+
+    return post_text
+
+
+# ── B) TIPS 長編パイプライン（Claude + スライディングウィンドウ）────
+
+def generate_tips_pipeline(
+    genre: str,
+    elements: str,
+    tips_url: str = "",
+    x_safe: bool = False,
+    horror_level: int = 3,
+) -> dict:
+    """
+    TIPS アフィリエイト 50% 特化型の多段階ステート管理長編生成パイプライン。
+
+    処理フロー:
+      ① 要素分解（舞台・人物・怪異の核を JSON で構造化）
+      ② 4 章プロット固定（1-2 章無料 / 3-4 章有料）
+      ③ 500 字スライディングウィンドウによるループ段階執筆
+      ④ 章ごとの高速検閲エージェント（is_valid JSON — NG 時のみリライト）
+      ⑤ ジャンル連動型アフィリエイトコピペキット 3 パターン自動生成
+
+    Returns:
+        {
+            "title"        : str,   # 作品タイトル
+            "free_part"    : str,   # 第 1〜2 章（無料公開エリア）
+            "paid_part"    : str,   # 第 3〜4 章（有料限定エリア）
+            "affiliate_kit": str,   # 50% 報酬アフィリエイト拡散コピペキット
+        }
+    """
+    load_dotenv(override=True)
+    genre_desc  = GENRE_DESCRIPTIONS.get(genre, genre)
+    genre_rules = _get_genre_extra_rules(genre)
+    policy      = X_POLICY_RULES if x_safe else ""
+    level_inst  = _get_horror_level_instruction(horror_level)
+    fmt_cfg     = _load_format_config("tips_long")
+    ch_defs     = fmt_cfg.get("structure", {}).get("chapter_definitions", {})
+
+    # ── ① 要素分解 ─────────────────────────────────────────────────
+    decompose_prompt = f"""これから TIPS（有料記事）として販売するホラー長編を書く。
+執筆前に設定を分解し、JSON で出力せよ。
+
+ジャンル：{genre}（{genre_desc}）
+ネタ・要素：{elements}
+{level_inst}
+{genre_rules}
+
+以下の JSON 形式のみで出力せよ（マークダウン・コードブロック・説明文は不要）：
+{{
+  "title"              : "作品タイトル（30 字以内・SEO 意識・クリックしたくなる具体性）",
+  "setting"            : "主な舞台・場所（50 字以内）",
+  "protagonist"        : "主人公の名前・属性（30 字以内）",
+  "horror_core"        : "怪異・恐怖の核心（50 字以内）",
+  "alive_characters"   : ["登場人物 1", "登場人物 2"],
+  "clues_to_plant"     : ["第 1〜2 章で撒く伏線 1", "伏線 2", "伏線 3"],
+  "clues_to_resolve"   : ["第 3〜4 章で回収する伏線 1", "伏線 2", "伏線 3"]
+}}"""
+
+    raw_decomp = _call_claude(decompose_prompt, max_tokens=900)
+    try:
+        state: dict = json.loads(raw_decomp)
+    except json.JSONDecodeError:
+        m = re.search(r'\{[\s\S]+\}', raw_decomp)
+        state = json.loads(m.group()) if m else {}
+
+    title             = state.get("title", "無題")
+    alive_characters  = state.get("alive_characters", [])
+    pending_clues     = state.get("clues_to_plant", [])
+    last_location     = state.get("setting", "不明")
+    logger.info(f"TIPS pipeline 開始: title={title}, genre={genre}")
+
+    # ── ② 4 章プロット固定 ─────────────────────────────────────────
+    plot_prompt = f"""TIPS ホラー長編「{title}」の 4 章構成プロットを作れ。
+
+設定：{json.dumps(state, ensure_ascii=False)}
+
+【各章の役割】
+第 1 章（無料）: 読者を引き込む最高密度の前半戦。日常の崩壊開始と最初の異変。
+第 2 章（無料）: 緊張感最大化。伏線を撒き、絶体絶命の引きで無料エリア終了。読者が課金せざるを得ない終わり方にする。
+第 3 章（有料）: 伏線回収開始。真相に迫る展開。怪異の正体・人間の本性が露わになる。
+第 4 章（有料）: 全伏線完全回収。強烈なオチ。AI っぽさ皆無の最高到達点。
+
+各章の内容を 3〜5 行で説明せよ。出力形式：
+第 1 章: （内容）
+第 2 章: （内容）
+第 3 章: （内容）
+第 4 章: （内容）"""
+
+    plot_text = _call_claude(plot_prompt, max_tokens=700)
+
+    # ── ③ スライディングウィンドウによるループ段階執筆 ──────────────
+    chapter_texts: list[str] = []
+    prev_chunk = ""  # 直前 500 字のチャンク（コンテキスト肥大化防止）
+
+    for ch_num in range(1, 5):
+        ch_def       = ch_defs.get(str(ch_num), {})
+        ch_role      = ch_def.get("role", f"第 {ch_num} 章")
+        ch_hook      = ch_def.get("hook", "")
+        target_chars = ch_def.get("target_chars", 1200)
+
+        # 章ごとに渡す軽量ステート（生存人物・未回収伏線のみ）
+        light_state = json.dumps({
+            "last_location"   : last_location,
+            "alive_characters": alive_characters,
+            "pending_clues"   : pending_clues,
+        }, ensure_ascii=False)
+
+        write_prompt = f"""TIPS ホラー長編「{title}」の第 {ch_num} 章を書け。
+
+【直前の文脈（直前 500 字のみ — コンテキスト節約）】
+{prev_chunk if prev_chunk else "（第 1 章：ここから開始）"}
+
+【現在の軽量ステート】
+{light_state}
+
+【この章の役割】
+{ch_role}
+{f"【引きの指示】{ch_hook}" if ch_hook else ""}
+
+【プロット参考】
+{plot_text}
+
+{ANTI_AI_RULES}
+{QUALITY_BOOST_RULES}
+{genre_rules}
+{policy}
+
+【執筆指示】
+- この章の目標文字数：{target_chars} 字前後
+- 断定口調のみ。禁句（実は・なんと・驚くことに・まとめると・つまり・でしょう・かもしれません）は絶対使わない
+- 五感の描写（温度・臭い・音・触覚・視覚の異常）を必ず入れる
+- 前章からの登場人物・場所・設定を一貫させる
+- 章の冒頭は「## 第 {ch_num} 章」の見出しで始める
+
+第 {ch_num} 章の本文のみを出力せよ。説明・前置き不要。"""
+
+        chapter_text = _call_claude(write_prompt, max_tokens=2800)
+
+        # ── ④ 高速検閲エージェント（NG 時のみリライト）──────────────
+        censor_prompt = f"""以下の文章を検閲し、結果を JSON のみで出力せよ。
+
+【対象（先頭 600 字）】
+{chapter_text[:600]}
+
+チェック項目：
+1. 禁止ワード（「実は」「なんと」「驚くことに」「まとめると」「つまり」「でしょう」「かもしれません」）が含まれていないか
+2. 断定口調（〜だ・〜した）になっているか
+3. 前章の設定（登場人物名・場所・時系列）と矛盾がないか
+
+出力形式（これのみ、他は一切不要）：
+{{"is_valid": true, "feedback": ""}}
+または
+{{"is_valid": false, "feedback": "50 字以内で修正点を記述"}}"""
+
+        censor_raw = _call_claude(censor_prompt, max_tokens=120)
+        try:
+            censor: dict = json.loads(censor_raw)
+        except json.JSONDecodeError:
+            m2 = re.search(r'\{[^{}]+\}', censor_raw)
+            censor = json.loads(m2.group()) if m2 else {"is_valid": True, "feedback": ""}
+
+        if not censor.get("is_valid", True):
+            feedback = censor.get("feedback", "")
+            logger.info(f"第 {ch_num} 章 検閲 NG: {feedback} → リライト実行")
+            rewrite_prompt = f"""以下の文章を修正して出力せよ。
+
+修正指示：{feedback}
+
+【修正前本文】
+{chapter_text}
+
+{ANTI_AI_RULES}
+
+修正済み本文のみを出力せよ。"""
+            chapter_text = _call_claude(rewrite_prompt, max_tokens=2800)
+
+        chapter_texts.append(chapter_text)
+        # 直前 500 字をスライディングウィンドウとして次章へ引き渡す
+        prev_chunk = chapter_text[-500:]
+        logger.info(f"第 {ch_num} 章 完了 ({len(chapter_text)} 字)")
+
+    # ── ⑤ ジャンル連動型アフィリエイトコピペキット自動生成 ─────────
+    tips_link = tips_url if tips_url else "（ここに TIPS の URL を貼る）"
+    affiliate_prompt = f"""TIPS ホラー長編「{title}」（ジャンル：{genre}）の購入者向け、
+SNS 50% 報酬アフィリエイト紹介文テンプレートを 3 パターン生成せよ。
+
+各パターンの条件：
+- 80〜120 字以内で完結すること
+- リンクは「{tips_link}」を末尾に配置
+- 購入者が即コピペして SNS に投稿できるレベルに完成させる
+- 絶対禁止ワード：「実は」「なんと」「驚くことに」「おすすめです」「ぜひ」
+- 断定口調で書く。「〜でした」「〜だった」を使う
+
+パターン A（考察煽り型）: 伏線の巧みさ・意味がわかった瞬間の衝撃を煽る紹介
+パターン B（純粋恐怖型）: 読後感の悪さ・止まらない恐怖感を伝える紹介
+パターン C（拡散促進型）: 誰かに教えたくなる・シェアせずにいられない感情を刺激する紹介
+
+出力形式（これのみ）：
+パターン A: （文章 + リンク）
+パターン B: （文章 + リンク）
+パターン C: （文章 + リンク）"""
+
+    affiliate_kit = _call_claude(affiliate_prompt, max_tokens=700)
+
+    free_part = "\n\n".join(chapter_texts[:2])
+    paid_part = "\n\n".join(chapter_texts[2:])
+
+    logger.info(f"TIPS pipeline 完了: 無料={len(free_part)}字 / 有料={len(paid_part)}字")
+
+    return {
+        "title"        : title,
+        "free_part"    : free_part,
+        "paid_part"    : paid_part,
+        "affiliate_kit": affiliate_kit,
+    }
     return results

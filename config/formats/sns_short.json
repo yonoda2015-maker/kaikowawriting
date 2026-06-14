@@ -1,0 +1,18 @@
+{
+  "format_id": "sns_short",
+  "label": "SNS1ショット（280字最適化）",
+  "model": "gpt-4o",
+  "output_schema": {"post_text": "string"},
+  "constraints": {
+    "min_chars": 200,
+    "max_chars": 260,
+    "forbidden_words": [
+      "実は", "なんと", "驚くことに", "まとめると", "つまり",
+      "〜と言えるでしょう", "でしょう", "かもしれません",
+      "おすすめです", "ぜひ"
+    ],
+    "tone": "断定口調のみ。〜だ・〜した・〜だった",
+    "structure": "起承転結＋ゾワッとするオチ必須"
+  },
+  "rationale": "出力トークン枠を200〜260字に強制制限することで、モデルの余計な補足・解説（AI臭さ）を物理的に封じ込める"
+}
