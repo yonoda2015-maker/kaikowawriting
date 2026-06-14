@@ -239,6 +239,212 @@ def _auto_correct_and_purify(text: str, genre: str = "") -> str:
     return cleaned
 
 
+# ─────────────────────────────────────────────────────────────────
+# v4.0 三段階自動検証システム（verify_horror_logic / auto_verify_and_fix）
+# ─────────────────────────────────────────────────────────────────
+
+def _infer_occupations(text: str) -> list[str]:
+    """テキスト中の職業キーワードから該当するブラックリストカテゴリを推定する。"""
+    mapping = {
+        "警察": ["警察", "警官", "刑事", "署長", "巡査", "警部", "交番", "捜査"],
+        "公務員": ["公務員", "役所", "市役所", "区役所", "町役場", "役場", "県庁", "市庁"],
+        "医師": ["医師", "医者", "看護師", "病院", "クリニック", "診察"],
+        "教師": ["教師", "先生", "教員", "学校", "担任", "教頭", "校長"],
+    }
+    found = []
+    for category, keywords in mapping.items():
+        if any(kw in text for kw in keywords):
+            found.append(category)
+    return found
+
+
+# ① 職業別コンプライアンス禁止行動辞書
+_OCCUPATION_BLACKLISTS: dict[str, list[str]] = {
+    "警察": [
+        "署給品", "官品", "警察手帳を持ち帰", "手帳を自宅", "私物スマホで証拠",
+        "住民台帳を個人", "捜査資料を持ち出", "拳銃を持ち帰", "警察手帳を譲渡",
+        "制服を譲渡", "制服を持ち帰", "無線機を持ち帰", "職務用品を個人",
+    ],
+    "公務員": [
+        "公文書を持ち帰", "住民情報を個人", "職員証を譲渡", "業務用PCを持ち出",
+    ],
+    "医師": [
+        "カルテを持ち出", "患者情報を個人", "処方箋を自宅", "医療記録を譲渡",
+    ],
+    "教師": [
+        "生徒の個人情報を持ち出", "成績記録を個人", "学籍簿を自宅",
+    ],
+}
+
+# ③ 冗長・二重表現の置換辞書（身体部位 + 動詞の無意味な重複）
+_REDUNDANCY_MAP: list[tuple[str, str]] = [
+    (r"頭の中[でに](?:思い|考え|記憶し|浮かべ)", "脳裏に刻み込まれ"),
+    (r"目で視認した", "視認した"),
+    (r"耳で(?:聞い|聴い)た", "聞いた"),
+    (r"手で触れた", "触れた"),
+    (r"口で言った", "言った"),
+    (r"心の中で(?:思い|感じ)", ""),  # 削除（直後の動詞を残す）
+    (r"目に見えた", "見えた"),
+    (r"頭で理解した", "理解した"),
+    (r"胸の中で(?:感じ|思い)", ""),
+    (r"脳内で(?:思い|考え)", ""),
+    (r"記憶の中に刻み込まれた", "脳裏に焼き付いた"),
+    (r"目撃してしまった", "見てしまった"),
+    (r"耳に入ってきた", "聞こえた"),
+    (r"肌で感じた", "感じた"),
+]
+
+
+def _fix_redundant_expressions(text: str) -> str:
+    """③ NLPフィルター: 身体部位＋動詞の冗長二重表現を一級品の日本語に置換。"""
+    result = text
+    for pattern, replacement in _REDUNDANCY_MAP:
+        result = re.sub(pattern, replacement, result)
+    # 空文字置換で生じた「てた」「でた」などの語尾崩れを修正
+    result = re.sub(r'([でてにを])\s*([たいけ])', r'\1\2', result)
+    return result
+
+
+def _check_occupation_compliance(text: str, occupation_hints: list[str]) -> tuple[bool, list[str]]:
+    """② 職業コンプライアンスチェック: ブラックリストキーワードとのマッチング。
+    Returns: (is_clean, violations)
+    """
+    violations: list[str] = []
+    for occ in occupation_hints:
+        blacklist = _OCCUPATION_BLACKLISTS.get(occ, [])
+        for term in blacklist:
+            if term in text:
+                violations.append(f"[{occ}規律違反] 「{term}」が含まれている")
+    return (len(violations) == 0), violations
+
+
+def verify_horror_logic(
+    text: str,
+    genre: str = "",
+    occupation_hints: list | None = None,
+    plot_context: str = "",
+) -> tuple[bool, str, str]:
+    """v4.0 三段階自動検証。
+
+    Stage1: タイムライン整合性（LLMがJSONで時系列を抽出 → 矛盾を検知）
+    Stage2: 職業コンプライアンス（キーワードブラックリスト照合）
+    Stage3: 冗長二重表現（Regex NLPフィルター）
+
+    Returns:
+        (passed: bool, feedback: str, corrected_text: str)
+        passed=True のとき feedback="" で corrected_text=元テキスト（Stage3置換済み）
+    """
+    if occupation_hints is None:
+        occupation_hints = []
+
+    issues: list[str] = []
+
+    # ── Stage 3: Regex冗長フィルター（副作用なし・先に適用） ──────────
+    fixed_text = _fix_redundant_expressions(text)
+
+    # ── Stage 2: 職業コンプライアンスチェック ──────────────────────────
+    is_clean, violations = _check_occupation_compliance(fixed_text, occupation_hints)
+    if not is_clean:
+        issues.extend(violations)
+
+    # ── Stage 1: タイムライン整合性（LLM JSON抽出） ──────────────────
+    timeline_prompt = f"""以下のホラー文章から、時系列イベントを抽出してJSONで出力せよ。
+
+【文章（先頭1000字）】
+{fixed_text[:1000]}
+
+【プロット前提】
+{plot_context if plot_context else "（なし）"}
+
+以下の形式のみで出力（マークダウン・コードブロック・説明文は不要）：
+{{
+  "events": [
+    {{"id": 1, "year_or_time": "（時期/西暦/不明）", "subject": "（主語）", "action": "（行動・状態）", "location": "（場所）"}},
+    ...
+  ],
+  "contradictions": [
+    "（矛盾の説明を日本語で30字以内。矛盾がなければ空配列）"
+  ]
+}}"""
+
+    try:
+        tl_raw = _call_claude(timeline_prompt, max_tokens=600)
+        try:
+            tl = json.loads(tl_raw)
+        except json.JSONDecodeError:
+            m = re.search(r'\{[\s\S]+\}', tl_raw)
+            tl = json.loads(m.group()) if m else {"events": [], "contradictions": []}
+
+        contradictions = tl.get("contradictions", [])
+        if contradictions:
+            issues.extend([f"[時系列矛盾] {c}" for c in contradictions])
+
+    except Exception as e:
+        logger.warning(f"verify_horror_logic Stage1 タイムライン抽出失敗: {e}")
+
+    if not issues:
+        return True, "", fixed_text
+
+    feedback = " / ".join(issues)
+    return False, feedback, fixed_text
+
+
+def auto_verify_and_fix(
+    text: str,
+    genre: str = "",
+    occupation_hints: list | None = None,
+    plot_context: str = "",
+    max_retries: int = 3,
+) -> str:
+    """verify_horror_logicをパスするまで最大max_retries回自動修正ループを回す。
+
+    各イテレーションで失敗した場合、feedbackをClaudeに渡してリライトさせる。
+    max_retries回失敗しても最後のcorrected_textを返す（出力を止めない）。
+    """
+    if occupation_hints is None:
+        occupation_hints = []
+
+    current = text
+    for attempt in range(1, max_retries + 1):
+        passed, feedback, corrected = verify_horror_logic(
+            current, genre, occupation_hints, plot_context
+        )
+        if passed:
+            logger.info(f"auto_verify_and_fix: {attempt}回目で検証パス")
+            return corrected
+
+        logger.info(f"auto_verify_and_fix: {attempt}/{max_retries} 失敗 → {feedback}")
+
+        # 自動リライト
+        fix_prompt = f"""以下のホラー文章に論理・法律・日本語の問題が検出された。修正して出力せよ。
+
+【検出された問題】
+{feedback}
+
+【修正方針】
+- 時系列矛盾: 矛盾する事実を除去し、物理的に整合する描写に変える
+- 職業規律違反: 実際の規律（官品返納義務、私物スマホ禁止など）に沿った描写に変える
+  例: 「手帳を持ち帰る」→「手帳は署に返納した。残ったのはポケットに入れた小さなメモだけだった」
+- 冗長表現: すでにStage3で修正済み（そのまま維持）
+
+{ANTI_AI_RULES}
+
+【修正前本文】
+{corrected}
+
+修正済み本文のみを出力せよ。説明・前置き不要。"""
+
+        try:
+            current = _call_claude(fix_prompt, max_tokens=max(3000, len(corrected.encode()) // 1))
+        except Exception as e:
+            logger.error(f"auto_verify_and_fix リライト失敗 (attempt {attempt}): {e}")
+            return corrected  # エラー時は最後の修正済みテキストを返す
+
+    logger.warning(f"auto_verify_and_fix: {max_retries}回試行後も未パス。最終出力を使用")
+    _, _, final = verify_horror_logic(current, genre, occupation_hints, plot_context)
+    return final
+
+
 def _parse_title_and_body(raw: str) -> tuple[str, str]:
     """【タイトル】【本文】フォーマットからタイトルと本文を分離する。"""
     import re
@@ -435,8 +641,8 @@ def generate_novel(genre: str, idea: str, char_count: int = 3000,
 
     raw = _call_claude(prompt, max_tokens=max_tokens)
     body, title = _parse_title_and_body(raw)
-    # 下調べメモと照らし合わせて矛盾を修正（本文のみ対象）
     body = _consistency_check(body, research_memo, content_type="短編小説")
+    body = auto_verify_and_fix(body, genre, _infer_occupations(body), plot_context=research_memo)
     return body, title
 
 
@@ -545,6 +751,7 @@ def generate_article(genre: str, idea: str, article_type: str, char_count: int =
     body, title, candidates = _parse_article_with_candidates(raw)
     body = _consistency_check(body, research_memo, content_type=article_type)
     body = _auto_correct_and_purify(body, genre)
+    body = auto_verify_and_fix(body, genre, _infer_occupations(body), plot_context=research_memo)
     return body, title, candidates
 
 
@@ -1534,6 +1741,13 @@ def generate_tips_pipeline(
 
         # v3.2 自動修正ガードレール
         chapter_text = _auto_correct_and_purify(chapter_text, genre)
+        # v4.0 三段階検証（TIPSはコスト重視でmax_retries=1）
+        chapter_text = auto_verify_and_fix(
+            chapter_text, genre,
+            _infer_occupations(chapter_text),
+            plot_context=json.dumps(state, ensure_ascii=False),
+            max_retries=1,
+        )
 
         # 第2章末尾にペイウォールマーカーを挿入
         if ch_num == 2:
