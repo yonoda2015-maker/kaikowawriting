@@ -633,7 +633,7 @@ def _design_theme(genre: str, idea: str, length_type: str, horror_level: int = 3
         "long": "章ごとの展開を想定し、伏線の配置と回収場所をすべて決める。",
     }.get(length_type, "")
 
-    prompt = f"""これから「{genre}」ジャンルのホラー文章を書く前の作品設計書を作れ。
+    prompt = f"""これから「{genre}」ジャンルのホラー文章を書く前の高品質な作品設計書を作れ。
 
 ジャンル：{genre}（{genre_desc}）
 ネタ・要素：{idea}
@@ -645,10 +645,11 @@ def _design_theme(genre: str, idea: str, length_type: str, horror_level: int = 3
 
 【設計の原則】
 - 「怖さの核（core_hook）」を最初に決め、ラストから逆算して全体を設計する
+- 「読者に何を感じさせるか（reader_experience）」を展開ごとに明確に設計する
 - 主人公の「欲求」「弱点」「変化」を明確にする（キャラクターアーク）
-- 伏線はすべて回収場所をセットで決める（placed_at / resolved_at）
+- 伏線はすべて回収場所と回収の目的をセットで決める（foreshadowing_map）
 - 怪異・恐怖のルール（world_rules）を作り、途中で絶対に破らない
-- 禁止展開（avoid）：夢オチ・説明過多・グロ頼り・帰り道で気づく時間差認知
+- ジャンルの失敗パターン（failure_patterns）を具体的に列挙し、本文に入れない
 
 以下のJSONのみを出力せよ（マークダウン・コードブロック・説明文は一切不要）：
 {{
@@ -656,6 +657,13 @@ def _design_theme(genre: str, idea: str, length_type: str, horror_level: int = 3
   "core_hook": "怖さの核・作品の引き（50字以内）",
   "theme": "テーマ（30字以内）",
   "setting": "主な舞台（30字以内）",
+  "reader_experience": {{
+    "opening_feeling": "冒頭で読者に感じさせる感情（例：日常感・軽い笑い）",
+    "middle_feeling": "中盤で読者に感じさせる感情（例：不安・不信感）",
+    "climax_feeling": "クライマックスで読者に感じさせる感情（例：背筋が凍る）",
+    "ending_feeling": "ラストで読者に感じさせる感情（例：現実に引き戻される恐怖）",
+    "aftertaste": "読後に残る余韻（例：自分の日常が信じられなくなる感覚）"
+  }},
   "main_character": {{
     "name_or_role": "名前または役割",
     "desire": "この人物の目的・欲求（30字以内）",
@@ -667,15 +675,36 @@ def _design_theme(genre: str, idea: str, length_type: str, horror_level: int = 3
   ],
   "central_conflict": "中心的な対立・葛藤（50字以内）",
   "world_rules": ["怪異・恐怖のルール1（絶対に破らないこと）", "ルール2"],
-  "foreshadowing": [
-    {{"clue": "伏線の内容", "placed_at": "どの場面で仕込む", "resolved_at": "どの場面で回収"}}
+  "foreshadowing_map": [
+    {{"clue": "伏線の内容", "placed_at": "どの場面で仕込む", "resolved_at": "どの場面で回収", "purpose": "回収時の読者体験・意味"}}
   ],
   "ending_twist": "ラストの反転・解決（50字以内）",
-  "tone": "文体のトーン（例：実話風・日記風・淡々と・息を切らしたリズム）",
-  "avoid": ["禁止展開1（夢オチ等）", "禁止展開2"]
+  "genre_quality_rules": [
+    "このジャンルで高品質と判断する基準1",
+    "基準2（例：ホラーなら『怖さの正体を説明しきらない』など）"
+  ],
+  "failure_patterns": [
+    "具体的な失敗パターン1（例：最後に背後に誰かいただけで終わる）",
+    "失敗パターン2（例：主人公が不自然に鈍感すぎる）",
+    "失敗パターン3（例：帰り道に違和感に気づく時間差認知）"
+  ],
+  "pacing_plan": {{
+    "opening": "冒頭の進め方・テンポ（例：日常描写から軽い違和感を滑り込ませる）",
+    "middle": "中盤の進め方・テンポ（例：違和感を複数回積み上げ加速）",
+    "climax": "クライマックスの進め方（例：短い文で畳み込む）",
+    "ending": "結末の処理（例：説明せず余韻で終わる）"
+  }},
+  "style_rules": {{
+    "sentence_length": "短文中心・長文中心・混在のどれか（例：短文7割・体言止め多用）",
+    "dialogue_ratio": "会話の比率（例：少なめ・セリフで怖さを表現）",
+    "description_ratio": "情景描写の比率（例：五感の異常描写を中心に置く）",
+    "narration_style": "語り口（例：一人称・実話風・記録文体）"
+  }},
+  "consistency_rules": ["設定の整合性を守るルール1", "ルール2"],
+  "avoid": ["禁止展開（夢オチ等）", "禁止展開2"]
 }}"""
 
-    raw = _call_claude(prompt, max_tokens=1200)
+    raw = _call_claude(prompt, max_tokens=1800)
     try:
         plan = json.loads(raw)
     except json.JSONDecodeError:
@@ -868,28 +897,253 @@ def _final_edit(plan: dict, structure: dict, draft: str, char_count: int, genre:
     return _call_claude(prompt, max_tokens=min(8000, len(draft.encode()) // 1 + 2000))
 
 
+def _write_chapter(
+    plan: dict, structure: dict, chapter_json: dict,
+    summary_state: dict, chapter_length: int,
+    genre: str, style_hint: str, x_safe: bool, horror_level: int,
+) -> str:
+    """長文用：1章分を生成する。"""
+    policy     = X_POLICY_RULES if x_safe else ""
+    level_inst = _get_horror_level_instruction(horror_level)
+    genre_rules = _get_genre_extra_rules(genre)
+    reader_exp = plan.get("reader_experience", {})
+
+    prompt = f"""以下の全体設計と章設計に従い、指定された章のみを執筆せよ。
+
+【全体作品設計】
+{json.dumps(plan, ensure_ascii=False)}
+
+【これまでの要約状態】
+{json.dumps(summary_state, ensure_ascii=False)}
+
+【今回執筆する章】
+{json.dumps(chapter_json, ensure_ascii=False)}
+
+【この章で読者に感じさせる感情の目標】
+chapter_number={chapter_json.get("chapter_number", "?")} の段階での reader_experience:
+- 中盤感情：{reader_exp.get("middle_feeling", "")}
+- ペース：{plan.get("pacing_plan", {}).get("middle", "")}
+
+【執筆条件】
+- この章の目的（purpose）を必ず達成する
+- これまでの要約状態（character_states / revealed_information）と矛盾しない
+- 文体を要約の style_notes に揃える
+- foreshadowing_to_place の伏線を自然に仕込む
+- まだ resolved しない情報は明かさない
+- 章の末尾は ending_hook で次章への引きを残す
+- 帰り道・後から気づく など時間差認知は絶対禁止
+- 目標文字数：約{chapter_length}字
+{ANTI_AI_RULES}
+{QUALITY_BOOST_RULES}
+{genre_rules}
+{policy}
+{style_hint}
+{level_inst}
+
+この章の本文のみを出力せよ。章タイトル・説明・前置き不要。"""
+
+    return _call_claude(prompt, max_tokens=min(4000, chapter_length * 2 + 500))
+
+
+def _check_chapter(
+    plan: dict, structure: dict, chapter_json: dict,
+    summary_state: dict, chapter_text: str,
+) -> str:
+    """長文用：1章の整合性チェックと修正。"""
+    prompt = f"""あなたは長編小説の編集者だ。以下の章本文をチェックし、必要なら修正せよ。
+
+【全体設計（抜粋）】
+world_rules: {json.dumps(plan.get("world_rules", []), ensure_ascii=False)}
+failure_patterns: {json.dumps(plan.get("failure_patterns", []), ensure_ascii=False)}
+foreshadowing_map: {json.dumps(plan.get("foreshadowing_map", []), ensure_ascii=False)}
+
+【これまでの要約状態】
+{json.dumps(summary_state, ensure_ascii=False)}
+
+【この章の設計】
+{json.dumps(chapter_json, ensure_ascii=False)}
+
+【章本文】
+{chapter_text}
+
+【チェック項目】
+- この章の purpose を達成しているか
+- 前章までの状態（character_states・revealed_information）と矛盾していないか
+- failure_patterns に該当する展開がないか
+- world_rules を破っていないか
+- ending_hook で次章への引きが残っているか
+- 時間差の認知（帰り道に気づく等）がないか
+- 文体が統一されているか
+{ANTI_AI_RULES}
+
+問題があれば修正し、修正済みの章本文のみを出力せよ。問題がない場合もそのまま出力せよ。"""
+
+    return _call_claude(prompt, max_tokens=min(4000, len(chapter_text.encode()) // 1 + 1000))
+
+
+def _update_chapter_summary(chapter_text: str, prev_state: dict) -> dict:
+    """長文用：章完了後に要約状態を更新する。次章生成のコンテキストアンカー。"""
+    prompt = f"""以下の章本文を読み、次章以降の生成に必要な状態を更新してJSONで出力せよ。
+
+【前章までの状態】
+{json.dumps(prev_state, ensure_ascii=False)}
+
+【今回の章本文】
+{chapter_text}
+
+以下のJSONのみを出力せよ：
+{{
+  "summary_so_far": "物語全体のここまでの要約（200字以内）",
+  "character_states": ["登場人物名: 現在の状態・場所・感情"],
+  "revealed_information": ["ここまでに開示された重要な情報"],
+  "unresolved_mysteries": ["未解決の謎・未回収の伏線"],
+  "active_foreshadowing": ["まだ回収されていない伏線"],
+  "style_notes": ["文体の特徴・維持すべき語り口"]
+}}"""
+
+    raw = _call_claude(prompt, max_tokens=600)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        m = re.search(r'\{[\s\S]+\}', raw)
+        return json.loads(m.group()) if m else prev_state
+
+
+def _write_long_novel(
+    plan: dict, structure: dict, char_count: int,
+    genre: str, style_hint: str, x_safe: bool, horror_level: int,
+) -> str:
+    """長文専用：章ごと生成＋章チェック＋要約更新ループ。"""
+    chapters = structure.get("chapters", [])
+    if not chapters:
+        # 章定義がなければ一括生成にフォールバック
+        return _write_body_from_plan(plan, structure, char_count, genre, style_hint, x_safe, horror_level)
+
+    chapter_length = max(800, char_count // len(chapters))
+    summary_state: dict = {
+        "summary_so_far": "",
+        "character_states": [],
+        "revealed_information": [],
+        "unresolved_mysteries": [],
+        "active_foreshadowing": [f["clue"] for f in plan.get("foreshadowing_map", [])],
+        "style_notes": [plan.get("style_rules", {}).get("narration_style", "")],
+    }
+    all_chapters: list[str] = []
+
+    for ch in chapters:
+        ch_num = ch.get("chapter_number", len(all_chapters) + 1)
+        logger.info(f"第{ch_num}章 生成開始")
+
+        # 生成
+        ch_text = _write_chapter(plan, structure, ch, summary_state, chapter_length, genre, style_hint, x_safe, horror_level)
+        # 章チェック＋修正
+        ch_text = _check_chapter(plan, structure, ch, summary_state, ch_text)
+        # v3.2 ガードレール（章単位）
+        ch_text = _auto_correct_and_purify(ch_text, genre)
+
+        all_chapters.append(ch_text)
+        # 要約状態を更新して次章へ
+        summary_state = _update_chapter_summary(ch_text, summary_state)
+        logger.info(f"第{ch_num}章 完了 ({len(ch_text)}字)")
+
+    return "\n\n".join(all_chapters)
+
+
+def _final_edit_two_stage(plan: dict, structure: dict, draft: str, char_count: int, genre: str) -> str:
+    """⑤ 2段階最終編集: 整合性チェック（JSON）→ リライト。
+    チェックとリライトを分けることでAIの「チェックしながら書き直す」という曖昧な動作を回避する。
+    """
+    # Stage A: 整合性チェック → 指摘JSONを得る
+    check_prompt = f"""物語の整合性を確認する編集者として、以下の本文を作品設計書と照らしてチェックせよ。
+
+【作品設計書】
+{json.dumps(plan, ensure_ascii=False)}
+
+【構成設計】
+{json.dumps(structure, ensure_ascii=False)}
+
+【本文】
+{draft}
+
+【チェック観点】
+- genre_quality_rules の各基準を満たしているか
+- failure_patterns に該当する展開がないか
+- foreshadowing_map の伏線が placed_at で仕込まれ resolved_at で回収されているか
+- world_rules を破っていないか
+- reader_experience（冒頭〜結末の感情設計）が機能しているか
+- 時間差の認知（帰り道に気づく等）がないか
+- 「帰り道に気づいた」「後から思い出した」などの禁止表現がないか
+
+以下のJSONのみを出力せよ（問題がなければ空配列）：
+{{
+  "consistency_issues": ["設定矛盾の具体的な指摘"],
+  "unresolved_foreshadowing": ["未回収の伏線"],
+  "failure_pattern_hits": ["検知した失敗パターンと箇所"],
+  "weak_scenes": ["展開が弱い場面"],
+  "reader_experience_gaps": ["感情設計とズレている箇所"],
+  "recommended_fixes": ["具体的な修正案"]
+}}"""
+
+    issues_raw = _call_claude(check_prompt, max_tokens=800)
+    try:
+        issues = json.loads(issues_raw)
+    except json.JSONDecodeError:
+        m = re.search(r'\{[\s\S]+\}', issues_raw)
+        issues = json.loads(m.group()) if m else {}
+
+    has_issues = any(v for v in issues.values() if isinstance(v, list) and v)
+
+    # Stage B: 指摘がある場合のみリライト
+    if has_issues:
+        rewrite_prompt = f"""以下の本文を指摘内容に基づいて修正せよ。
+
+【本文】
+{draft}
+
+【修正指示（必ずすべて対応する）】
+{json.dumps(issues, ensure_ascii=False)}
+
+【修正原則】
+- 物語の核（core_hook・ending_twist）は変えない
+- 指摘された矛盾・未回収伏線・失敗パターンを修正する
+- reader_experience の感情設計に沿うよう調整する
+- 説明過多を避け、体験・行動・五感で見せる
+- 目標文字数：約{char_count}字
+{ANTI_AI_RULES}
+
+完成本文のみを出力せよ。タイトル・説明・前置き不要。"""
+
+        return _call_claude(rewrite_prompt, max_tokens=min(8000, len(draft.encode()) // 1 + 2000))
+
+    # 指摘がなければ軽微な仕上げのみ
+    return _final_edit(plan, structure, draft, char_count, genre)
+
+
 def generate_novel(genre: str, idea: str, char_count: int = 3000,
                    x_safe: bool = False, style_hint: str = "",
                    horror_level: int = 3) -> tuple[str, str]:
-    """v4.1 品質重視5エージェントパイプラインで小説を生成する。
-    ① 文字数タイプ判定 → ② テーマ設計 → ③ 構成設計 → ④ 本文生成 → ⑤ 最終編集
-    → v3.2/v4.0 ガードレール（auto_correct → verify）
+    """v4.2 品質重視パイプライン（章ごと生成＋2段階最終編集）。
+    short/middle: ② テーマ設計 → ③ 構成 → ④ 一括生成 → ⑤ 2段階編集
+    long:         ② テーマ設計 → ③ 構成 → ④ 章ごと生成＋章チェック → ⑤ 2段階編集
+    → v3.2/v4.0 ガードレール
     """
-    # ① 文字数タイプ判定
     length_type = _classify_length(char_count)
     logger.info(f"generate_novel 開始: genre={genre}, chars={char_count}, type={length_type}")
 
-    # ② テーマ設計（ラストから逆算・伏線マップ・キャラクターアーク）
+    # ② テーマ設計（reader_experience・failure_patterns・foreshadowing_map・style_rules）
     plan = _design_theme(genre, idea, length_type, horror_level)
 
     # ③ 文字数タイプ別構成設計
     structure = _design_structure(plan, length_type)
 
-    # ④ 本文生成（設計書＋構成JSONを完全に渡す）
-    draft = _write_body_from_plan(plan, structure, char_count, genre, style_hint, x_safe, horror_level)
+    # ④ 本文生成（long は章ごと、それ以外は一括）
+    if length_type == "long":
+        draft = _write_long_novel(plan, structure, char_count, genre, style_hint, x_safe, horror_level)
+    else:
+        draft = _write_body_from_plan(plan, structure, char_count, genre, style_hint, x_safe, horror_level)
 
-    # ⑤ 最終チェック・修正（編集者エージェント）
-    body = _final_edit(plan, structure, draft, char_count, genre)
+    # ⑤ 2段階最終編集（整合性チェックJSON → リライト）
+    body = _final_edit_two_stage(plan, structure, draft, char_count, genre)
 
     # v3.2 自動修正ガードレール（Regex＋LLMメタ検閲）
     body = _auto_correct_and_purify(body, genre)
