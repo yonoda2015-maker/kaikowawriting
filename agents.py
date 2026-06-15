@@ -183,22 +183,27 @@ def _auto_correct_and_purify(text: str, genre: str = "") -> str:
         cleaned = re.sub(pattern, replacement, cleaned)
 
     # ── B) LLMメタ検閲（物理・認知矛盾チェック） ──────────────────
-    # 先頭800字のみを検閲対象としてトークンを節約
-    sample = cleaned[:800]
+    # 末尾に問題が集中するケースがあるため全文を対象にする（長すぎる場合は先頭+末尾を結合）
+    if len(cleaned) <= 1200:
+        sample = cleaned
+    else:
+        sample = cleaned[:600] + "\n…（中略）…\n" + cleaned[-600:]
     meta_prompt = f"""以下のホラー文章を検閲し、JSON のみで出力せよ。
 
-【検閲対象（先頭800字）】
+【検閲対象】
 {sample}
 
-【チェック項目】
-1. 「後から気づく」「帰り道に思い出す」「ふと気がついた」など時間差の認知がある → NG
+【チェック項目（すべて厳格に判定すること）】
+1. 「帰り道」「翌日」「後から」「あとで」「ふと気づ」「ふと気がつ」「思い返す」「振り返る」「家に帰ってから」など、
+   その場を離れた後・時間が経ってから恐怖・違和感に気づく構造がある → NG
+   （恐怖はその場のリアルタイムで知覚されなければならない）
 2. 登場人物がスマホ・デバイスを使用していない状況でデータ・写真・記録を提示している（物理矛盾）→ NG
-3. 「〜という説がある」「理由は〜だ」「まとめると〜」など解説調・刑事ドラマ風の整理構造がある → NG
+3. 「〜という説がある」「理由は〜だ」「まとめると〜」「〜ということになる」など解説調・整理構造がある → NG
 
 判定結果を以下の形式のみで出力（他は一切不要）：
 {{"is_valid": true, "issue": "", "fix_instruction": ""}}
 または
-{{"is_valid": false, "issue": "検知した問題を30字以内で", "fix_instruction": "修正方針を50字以内で"}}"""
+{{"is_valid": false, "issue": "検知した問題を40字以内で", "fix_instruction": "修正方針を60字以内で"}}"""
 
     try:
         censor_raw = _call_claude(meta_prompt, max_tokens=150)
@@ -348,10 +353,11 @@ def verify_horror_logic(
         issues.extend(violations)
 
     # ── Stage 1: タイムライン整合性（LLM JSON抽出） ──────────────────
+    tl_sample = fixed_text if len(fixed_text) <= 1200 else fixed_text[:600] + "\n…\n" + fixed_text[-600:]
     timeline_prompt = f"""以下のホラー文章から、時系列イベントを抽出してJSONで出力せよ。
 
-【文章（先頭1000字）】
-{fixed_text[:1000]}
+【文章】
+{tl_sample}
 
 【プロット前提】
 {plot_context if plot_context else "（なし）"}
