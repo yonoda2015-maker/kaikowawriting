@@ -607,48 +607,302 @@ NOVEL_SEO_RULES = """
 """
 
 
-def generate_novel(genre: str, idea: str, char_count: int = 3000,
-                   x_safe: bool = False, style_hint: str = "",
-                   horror_level: int = 3) -> tuple[str, str]:
-    """小説本文とタイトルをtupleで返す。"""
-    genre_desc = GENRE_DESCRIPTIONS.get(genre, genre)
-    max_tokens = min(8000, char_count * 2)
-    policy     = X_POLICY_RULES if x_safe else ""
-    level_inst = _get_horror_level_instruction(horror_level)
-    imi_rule   = IMI_KOWAI_RULES if genre == "意味がわかると怖い" else (OMO_KOWAI_RULES if genre == "面白くて怖い（おも怖い）" else "")
+# ─────────────────────────────────────────────────────────────────
+# v4.1 品質重視5エージェントパイプライン
+# ─────────────────────────────────────────────────────────────────
 
-    # 小説は長文ほど矛盾が起きやすいため、下調べメモを必ず作って一貫性の土台にする
-    research_memo = _research_idea(idea, genre, content_type="短編小説")
-    memo_block = f"\n【下調べメモ（これを踏まえて矛盾なく書くこと）】\n{research_memo}\n" if research_memo else ""
+def _classify_length(char_count: int) -> str:
+    """文字数から生成タイプを判定する。"""
+    if char_count <= 1000:
+        return "short"
+    elif char_count <= 5000:
+        return "middle"
+    return "long"
 
-    prompt = f"""以下の条件でこわ面白い短編小説を書け。
+
+def _design_theme(genre: str, idea: str, length_type: str, horror_level: int = 3) -> dict:
+    """② テーマ設計エージェント: 作品の核をJSONで設計する。ラストから逆算して全体を設計。"""
+    genre_desc  = GENRE_DESCRIPTIONS.get(genre, genre)
+    level_inst  = _get_horror_level_instruction(horror_level)
+    genre_rules = _get_genre_extra_rules(genre)
+    imi_rule    = IMI_KOWAI_RULES if genre == "意味がわかると怖い" else ""
+    omo_rule    = OMO_KOWAI_RULES if genre == "面白くて怖い（おも怖い）" else ""
+    length_guidance = {
+        "short": "登場人物を1〜2人、舞台を1〜2か所に絞る。伏線は最大3つ。",
+        "middle": "起承転結を明確にし、主人公の感情変化を設計する。伏線2〜5個。",
+        "long": "章ごとの展開を想定し、伏線の配置と回収場所をすべて決める。",
+    }.get(length_type, "")
+
+    prompt = f"""これから「{genre}」ジャンルのホラー文章を書く前の作品設計書を作れ。
 
 ジャンル：{genre}（{genre_desc}）
-ネタ：{idea}
-目標文字数：約{char_count}字
+ネタ・要素：{idea}
+文字数タイプ：{length_type}（{length_guidance}）
 {level_inst}
-{memo_block}
+{genre_rules}
+{imi_rule}
+{omo_rule}
+
+【設計の原則】
+- 「怖さの核（core_hook）」を最初に決め、ラストから逆算して全体を設計する
+- 主人公の「欲求」「弱点」「変化」を明確にする（キャラクターアーク）
+- 伏線はすべて回収場所をセットで決める（placed_at / resolved_at）
+- 怪異・恐怖のルール（world_rules）を作り、途中で絶対に破らない
+- 禁止展開（avoid）：夢オチ・説明過多・グロ頼り・帰り道で気づく時間差認知
+
+以下のJSONのみを出力せよ（マークダウン・コードブロック・説明文は一切不要）：
+{{
+  "title": "作品タイトル（30字以内・クリックしたくなる具体性）",
+  "core_hook": "怖さの核・作品の引き（50字以内）",
+  "theme": "テーマ（30字以内）",
+  "setting": "主な舞台（30字以内）",
+  "main_character": {{
+    "name_or_role": "名前または役割",
+    "desire": "この人物の目的・欲求（30字以内）",
+    "weakness": "弱点・盲点（30字以内）",
+    "change": "物語を通じた変化（30字以内）"
+  }},
+  "sub_characters": [
+    {{"name_or_role": "", "role_in_story": "", "relationship_to_main": ""}}
+  ],
+  "central_conflict": "中心的な対立・葛藤（50字以内）",
+  "world_rules": ["怪異・恐怖のルール1（絶対に破らないこと）", "ルール2"],
+  "foreshadowing": [
+    {{"clue": "伏線の内容", "placed_at": "どの場面で仕込む", "resolved_at": "どの場面で回収"}}
+  ],
+  "ending_twist": "ラストの反転・解決（50字以内）",
+  "tone": "文体のトーン（例：実話風・日記風・淡々と・息を切らしたリズム）",
+  "avoid": ["禁止展開1（夢オチ等）", "禁止展開2"]
+}}"""
+
+    raw = _call_claude(prompt, max_tokens=1200)
+    try:
+        plan = json.loads(raw)
+    except json.JSONDecodeError:
+        m = re.search(r'\{[\s\S]+\}', raw)
+        plan = json.loads(m.group()) if m else {}
+    logger.info(f"テーマ設計完了: title={plan.get('title', '?')}, hook={plan.get('core_hook', '?')[:30]}")
+    return plan
+
+
+def _design_structure(plan: dict, length_type: str) -> dict:
+    """③ 構成設計エージェント: 文字数タイプ別に具体的な構成JSONを作る。"""
+    plan_str = json.dumps(plan, ensure_ascii=False)
+
+    if length_type == "short":
+        prompt = f"""以下の作品設計書をもとに、1000字以下の短文ホラーに適した構成を作れ。
+
+作品設計書：
+{plan_str}
+
+以下のJSONのみを出力せよ（マークダウン・コードブロック不要）：
+{{
+  "length_type": "short",
+  "opening": "日常的な語り出し（何を書くか）",
+  "development": "軽い違和感の具体的描写",
+  "turning_point": "違和感の意味が変わる瞬間（その場でリアルタイムに気づかせる）",
+  "ending": "ラストの展開",
+  "final_line_intent": "最後の一文が読者に与える感覚・気づき",
+  "must_include": ["必ず入れる要素"],
+  "must_not_include": ["夢オチ", "帰り道で気づく時間差認知", "禁止事項"]
+}}
+
+条件：登場人物1〜2人・舞台1〜2か所・説明より印象優先・最後の一文で読後感が変わる構成・余韻を残す"""
+
+    elif length_type == "middle":
+        prompt = f"""以下の作品設計書をもとに、1001〜5000字の中編ホラーに適した構成を作れ。
+
+作品設計書：
+{plan_str}
+
+以下のJSONのみを出力せよ：
+{{
+  "length_type": "middle",
+  "overall_summary": "全体の流れ（80字以内）",
+  "structure": {{
+    "opening": "主人公の日常と初期状態",
+    "first_turn": "最初の違和感・異変（その場でリアルタイムに）",
+    "development": "違和感が複数回起きる・主人公が調べ始める",
+    "midpoint": "過去の記録や証言とつながる転換点",
+    "climax": "主人公が異常に巻き込まれる・逃げ場がない",
+    "ending": "反転・余韻（すべてを説明しきらない）"
+  }},
+  "foreshadowing_map": [
+    {{"foreshadowing": "伏線の内容", "placed_in": "配置する場面", "resolved_in": "回収する場面"}}
+  ],
+  "character_change": "主人公の感情・認識の変化",
+  "must_include": ["必ず入れる要素"],
+  "must_not_include": ["夢オチ", "帰り道で気づく時間差認知", "禁止事項"]
+}}
+
+条件：中盤で必ず変化を入れる・伏線と回収場所を明示・すべてを説明しきらない"""
+
+    else:  # long
+        prompt = f"""以下の作品設計書をもとに、5000字以上の長編ホラーの章構成を作れ。
+
+作品設計書：
+{plan_str}
+
+以下のJSONのみを出力せよ：
+{{
+  "length_type": "long",
+  "overall_summary": "全体の流れ（100字以内）",
+  "chapters": [
+    {{
+      "chapter_number": 1,
+      "chapter_title": "タイトル",
+      "purpose": "この章の役割",
+      "main_event": "主な出来事",
+      "character_change": "この章での主人公の変化",
+      "foreshadowing_to_place": ["ここで仕込む伏線"],
+      "information_to_reveal": ["ここで開示する情報"],
+      "ending_hook": "次章への引き（読み続けさせる仕掛け）"
+    }}
+  ],
+  "foreshadowing_map": [
+    {{"foreshadowing": "伏線", "placed_in": "配置章", "resolved_in": "回収章", "meaning_after_reveal": "回収後の意味"}}
+  ],
+  "character_arc": "主人公の認識の段階的変化",
+  "climax_design": "クライマックスの設計",
+  "ending_design": "結末の設計",
+  "consistency_rules": ["守るべきルール・設定（world_rulesと一致させる）"]
+}}
+
+条件：各章に明確な役割・中盤停滞させない・伏線回収場所を明確に・ラストへ段階的に情報開示"""
+
+    raw = _call_claude(prompt, max_tokens=1500)
+    try:
+        structure = json.loads(raw)
+    except json.JSONDecodeError:
+        m = re.search(r'\{[\s\S]+\}', raw)
+        structure = json.loads(m.group()) if m else {"length_type": length_type}
+    logger.info(f"構成設計完了: type={length_type}")
+    return structure
+
+
+def _write_body_from_plan(
+    plan: dict, structure: dict, char_count: int,
+    genre: str, style_hint: str = "", x_safe: bool = False,
+    horror_level: int = 3,
+) -> str:
+    """④ 本文生成エージェント: 設計書と構成JSONから本文を生成する。"""
+    length_type = structure.get("length_type", "middle")
+    policy      = X_POLICY_RULES if x_safe else ""
+    level_inst  = _get_horror_level_instruction(horror_level)
+    genre_rules = _get_genre_extra_rules(genre)
+    max_tokens  = min(8000, char_count * 2)
+
+    length_specific = {
+        "short": "- 場面を増やしすぎない\n- 余韻を重視する\n- ラストの一文を強くする\n- 情報を詰め込みすぎない",
+        "middle": "- 起承転結を明確に展開する\n- 中盤で物語を動かす\n- 主人公の感情変化を入れる",
+        "long": "- 章ごとの目的を守る\n- 中盤にも変化を入れる\n- 伏線を全て回収する\n- 章の終わりに次を読みたくなる要素を入れる",
+    }.get(length_type, "")
+
+    prompt = f"""以下の作品設計書と構成設計に従い、ホラー本文を執筆せよ。
+
+【作品設計書】
+{json.dumps(plan, ensure_ascii=False)}
+
+【構成設計】
+{json.dumps(structure, ensure_ascii=False)}
+
+【執筆条件】
+- ジャンル：{genre}
+- 目標文字数：約{char_count}字
+- {level_inst}
+- 設計書の foreshadowing を構成で指定した場面に自然に仕込み、resolved_at で必ず回収する
+- world_rules を途中で絶対に破らない
+- 登場人物の行動を設定と一致させる
+- 説明だけで進めない。場面・行動・五感で見せる
+- 不自然な急展開・夢オチ禁止
+- 「帰り道に気づく」「後から思い出す」などの時間差認知は絶対禁止。恐怖はその場でリアルタイムに描写する
+{length_specific}
 {ANTI_AI_RULES}
 {QUALITY_BOOST_RULES}
 {NOVEL_SEO_RULES}
+{genre_rules}
 {policy}
 {style_hint}
-{imi_rule}
-- 一人称または三人称で、実話風に書く
-- ラストは「ゾワッとするオチ」にする
 
-必ず以下のフォーマットで出力すること：
+本文のみを出力せよ。タイトル・説明・前置き不要。"""
 
-【タイトル】
-（ここにタイトルを1行で書く）
+    return _call_claude(prompt, max_tokens=max_tokens)
+
+
+def _final_edit(plan: dict, structure: dict, draft: str, char_count: int, genre: str) -> str:
+    """⑤ 最終チェック・修正エージェント: 設計書と構成に照らして品質確認・修正する。"""
+    length_type = structure.get("length_type", "middle")
+    length_checks = {
+        "short": "- 短文なのに情報を詰め込みすぎていないか\n- 余韻が残るラストになっているか\n- ラストの一文が最大限に機能しているか",
+        "middle": "- 中盤に変化があるか\n- 起承転結が機能しているか\n- 主人公の感情変化が描かれているか",
+        "long": "- 途中で話がズレていないか\n- 伏線が設計書の通りに全て回収されているか\n- 各章の役割が果たされているか",
+    }.get(length_type, "")
+
+    prompt = f"""あなたは小説編集者だ。以下の本文を作品設計書と構成設計に照らし合わせてチェックし、修正せよ。
+
+【作品設計書】
+{json.dumps(plan, ensure_ascii=False)}
+
+【構成設計】
+{json.dumps(structure, ensure_ascii=False)}
 
 【本文】
-（ここに小説本文を書く）"""
+{draft}
 
-    raw = _call_claude(prompt, max_tokens=max_tokens)
-    body, title = _parse_title_and_body(raw)
-    body = _consistency_check(body, research_memo, content_type="短編小説")
-    body = auto_verify_and_fix(body, genre, _infer_occupations(body), plot_context=research_memo)
+【チェック項目（すべて確認し、問題があれば修正する）】
+- 目標文字数（約{char_count}字）に近いか
+- ジャンル（{genre}）に合っているか
+- 冒頭に引きがあるか
+- 設計書の foreshadowing が構成で指定した場面に配置・回収されているか
+- world_rules を途中で破っていないか
+- ラストが弱くないか（ending_twist が機能しているか）
+- 説明過多になっていないか
+- 登場人物の行動が設定と矛盾していないか
+- 「帰り道に気づく」「後から思い出す」など時間差の認知がないか（→その場でリアルタイムに気づかせる）
+{length_checks}
+{ANTI_AI_RULES}
+
+問題がある場合は本文を修正せよ。問題がない場合も完成度が上がるよう自然に整えよ。
+完成本文のみを出力せよ。タイトル・説明・前置き不要。"""
+
+    return _call_claude(prompt, max_tokens=min(8000, len(draft.encode()) // 1 + 2000))
+
+
+def generate_novel(genre: str, idea: str, char_count: int = 3000,
+                   x_safe: bool = False, style_hint: str = "",
+                   horror_level: int = 3) -> tuple[str, str]:
+    """v4.1 品質重視5エージェントパイプラインで小説を生成する。
+    ① 文字数タイプ判定 → ② テーマ設計 → ③ 構成設計 → ④ 本文生成 → ⑤ 最終編集
+    → v3.2/v4.0 ガードレール（auto_correct → verify）
+    """
+    # ① 文字数タイプ判定
+    length_type = _classify_length(char_count)
+    logger.info(f"generate_novel 開始: genre={genre}, chars={char_count}, type={length_type}")
+
+    # ② テーマ設計（ラストから逆算・伏線マップ・キャラクターアーク）
+    plan = _design_theme(genre, idea, length_type, horror_level)
+
+    # ③ 文字数タイプ別構成設計
+    structure = _design_structure(plan, length_type)
+
+    # ④ 本文生成（設計書＋構成JSONを完全に渡す）
+    draft = _write_body_from_plan(plan, structure, char_count, genre, style_hint, x_safe, horror_level)
+
+    # ⑤ 最終チェック・修正（編集者エージェント）
+    body = _final_edit(plan, structure, draft, char_count, genre)
+
+    # v3.2 自動修正ガードレール（Regex＋LLMメタ検閲）
+    body = _auto_correct_and_purify(body, genre)
+
+    # v4.0 三段階自動検証（タイムライン・職業規律・冗長NLP）
+    body = auto_verify_and_fix(
+        body, genre,
+        _infer_occupations(body),
+        plot_context=json.dumps(plan, ensure_ascii=False),
+    )
+
+    title = plan.get("title", "")
+    logger.info(f"generate_novel 完了: title={title}, body={len(body)}字")
     return body, title
 
 
