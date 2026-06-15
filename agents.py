@@ -1119,12 +1119,167 @@ def _final_edit_two_stage(plan: dict, structure: dict, draft: str, char_count: i
     return _final_edit(plan, structure, draft, char_count, genre)
 
 
+def _score_quality(plan: dict, body: str, genre: str) -> dict:
+    """v4.3 品質スコアリング: 6軸で0〜10点評価 → auto-retry判定。
+    Returns:
+        {genre_fit, originality, structure, character_consistency,
+         ending_strength, readability, overall_score, needs_rewrite, main_weakness}
+    """
+    score_prompt = f"""以下の小説/ホラー作品を厳格に採点せよ。採点基準を厳しく保つこと（7点以上は本当に良い作品のみ）。
+
+【ジャンル】{genre}
+【作品設計書】
+{json.dumps(plan, ensure_ascii=False, indent=2)}
+
+【本文】
+{body}
+
+以下のJSONのみ出力せよ（他の文字は一切不要）：
+{{
+  "genre_fit": <0-10>,
+  "originality": <0-10>,
+  "structure": <0-10>,
+  "character_consistency": <0-10>,
+  "ending_strength": <0-10>,
+  "readability": <0-10>,
+  "overall_score": <0-10の平均>,
+  "needs_rewrite": <true/false>,
+  "main_weakness": "<最も改善が必要な点を1文で>"
+}}
+
+採点基準：
+- genre_fit: ジャンルの恐怖・笑い・感情の質感が正確か
+- originality: 「よくあるパターン」を超えた独自の仕掛けがあるか
+- structure: 伏線回収・ペーシング・転換点が機能しているか
+- character_consistency: キャラの行動・感情が一貫しているか
+- ending_strength: ラストが心に刺さるか（ホラーなら余韻・恐怖、面白怖いならカタルシス）
+- readability: AIっぽさがなく自然に読めるか、説明過多でないか"""
+
+    raw = _call_claude(score_prompt, max_tokens=400)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        m = re.search(r'\{[\s\S]+\}', raw)
+        if m:
+            try:
+                return json.loads(m.group())
+            except json.JSONDecodeError:
+                pass
+    return {"overall_score": 7.5, "needs_rewrite": False, "main_weakness": "", "ending_strength": 7}
+
+
+def _strengthen_ending(plan: dict, body: str, genre: str) -> str:
+    """v4.3 ラスト専門エージェント: ラスト案3つ生成 → 最良を選んで差し替え。
+    body の最後の段落（300字以内）を対象にする。
+    """
+    last_part = body[-400:] if len(body) > 400 else body
+    rest = body[:-400] if len(body) > 400 else ""
+
+    alt_prompt = f"""以下のホラー作品のラスト部分を3パターン書き直せ。
+
+【ジャンル】{genre}
+【作品設計書（ending_twist・reader_experience.ending_feeling参照）】
+{json.dumps({k: plan.get(k) for k in ['ending_twist','reader_experience','genre_quality_rules','core_hook'] if plan.get(k)}, ensure_ascii=False)}
+
+【現在のラスト（これを超えること）】
+{last_part}
+
+ルール：
+- 3パターンそれぞれを「===ENDING_A===」「===ENDING_B===」「===ENDING_C===」で区切る
+- 各パターンは200〜400字
+- 余韻・余白を意識し説明をするな
+- AIっぽい「〜だったのだ」「つまり〜」「その後〜」禁止
+- 読者の背筋が凉しくなるか、頭を抱えるオチにする
+
+出力形式：
+===ENDING_A===
+（パターンAのラスト）
+===ENDING_B===
+（パターンBのラスト）
+===ENDING_C===
+（パターンCのラスト）"""
+
+    alts_raw = _call_claude(alt_prompt, max_tokens=1200)
+
+    # 3案をパース
+    endings = {}
+    for label in ["A", "B", "C"]:
+        m = re.search(rf'===ENDING_{label}===\s*([\s\S]+?)(?====ENDING_|$)', alts_raw)
+        if m:
+            endings[label] = m.group(1).strip()
+
+    if not endings:
+        return body
+
+    # 最良案をClaude自身が選択
+    pick_prompt = f"""以下3つのラスト案から、最もホラー/恐怖/余韻として優れた1つを選べ。
+
+{json.dumps(endings, ensure_ascii=False)}
+
+AまたはBまたはCとだけ答えよ。"""
+    choice = _call_claude(pick_prompt, max_tokens=10).strip().upper()
+    best = endings.get(choice, endings.get("A", ""))
+
+    if best:
+        return rest + best
+    return body
+
+
+def _strengthen_opening(plan: dict, body: str, genre: str) -> str:
+    """v4.3 冒頭専門エージェント: 1文目〜3段落目を強化。"""
+    # 最初の300字を対象
+    open_part = body[:300] if len(body) > 300 else body
+    rest = body[300:] if len(body) > 300 else ""
+
+    check_prompt = f"""以下の冒頭文を評価せよ。
+
+【ジャンル】{genre}
+【冒頭】
+{open_part}
+
+チェック項目：
+1. 1文目から引き込まれるか（説明から始まっていないか）
+2. ジャンル感（恐怖・不穏・笑い）が最初の2文以内に滲んでいるか
+3. 状況説明・時間説明・場所説明だけで始まっていないか
+
+問題があればtrue、なければfalseをJSONで返せ：
+{{"needs_fix": true/false, "reason": "理由"}}"""
+
+    raw = _call_claude(check_prompt, max_tokens=150)
+    try:
+        check = json.loads(raw)
+    except json.JSONDecodeError:
+        m = re.search(r'\{[\s\S]+\}', raw)
+        check = json.loads(m.group()) if m else {"needs_fix": False}
+
+    if not check.get("needs_fix"):
+        return body
+
+    fix_prompt = f"""以下の冒頭を書き直せ。
+
+【ジャンル】{genre}
+【問題】{check.get('reason', '')}
+【現在の冒頭】
+{open_part}
+【作品設計書（opening_feeling参照）】
+{json.dumps({k: plan.get(k) for k in ['reader_experience','core_hook','setting'] if plan.get(k)}, ensure_ascii=False)}
+
+ルール：
+- 1文目から「何かがおかしい」感を入れる
+- 説明で始めるな。行動・状況・五感で始めろ
+- 約200〜300字に収める
+- 完成した冒頭のみ出力（前置き不要）"""
+
+    new_open = _call_claude(fix_prompt, max_tokens=400)
+    return new_open.strip() + "\n\n" + rest
+
+
 def generate_novel(genre: str, idea: str, char_count: int = 3000,
                    x_safe: bool = False, style_hint: str = "",
                    horror_level: int = 3) -> tuple[str, str]:
-    """v4.2 品質重視パイプライン（章ごと生成＋2段階最終編集）。
-    short/middle: ② テーマ設計 → ③ 構成 → ④ 一括生成 → ⑤ 2段階編集
-    long:         ② テーマ設計 → ③ 構成 → ④ 章ごと生成＋章チェック → ⑤ 2段階編集
+    """v4.3 品質重視パイプライン＋スコアリング＋専門エージェント。
+    short/middle: ② テーマ設計 → ③ 構成 → ④ 一括生成 → ⑤ 2段階編集 → ⑥ スコア→専門強化
+    long:         ② テーマ設計 → ③ 構成 → ④ 章ごと生成＋章チェック → ⑤ 2段階編集 → ⑥ スコア→専門強化
     → v3.2/v4.0 ガードレール
     """
     length_type = _classify_length(char_count)
@@ -1155,8 +1310,47 @@ def generate_novel(genre: str, idea: str, char_count: int = 3000,
         plot_context=json.dumps(plan, ensure_ascii=False),
     )
 
+    # v4.3 品質スコアリング＋専門エージェント強化
+    score = _score_quality(plan, body, genre)
+    overall = score.get("overall_score", 7.5)
+    logger.info(f"品質スコア: {score}")
+
+    if overall < 7.0:
+        # 全体再構成: 構成を維持したまま本文を再生成してパイプラインを再通過
+        logger.info(f"スコア低（{overall}）→ 本文を再生成")
+        if length_type == "long":
+            body = _write_long_novel(plan, structure, char_count, genre, style_hint, x_safe, horror_level)
+        else:
+            body = _write_body_from_plan(plan, structure, char_count, genre, style_hint, x_safe, horror_level)
+        body = _final_edit_two_stage(plan, structure, body, char_count, genre)
+        body = _auto_correct_and_purify(body, genre)
+    elif overall < 8.0:
+        # 弱点ピンポイント修正
+        logger.info(f"スコア普通（{overall}）→ 弱点修正: {score.get('main_weakness','')}")
+        weakness = score.get("main_weakness", "")
+        if weakness:
+            fix_prompt = f"""以下の小説の弱点を1点だけ修正せよ。
+
+【弱点】{weakness}
+【本文】
+{body}
+
+修正原則：核心（ending_twist・core_hook）は変えない。弱点箇所のみ集中修正。
+完成本文のみ出力。"""
+            body = _call_claude(fix_prompt, max_tokens=min(8000, char_count * 2))
+
+    # ラスト専門エージェント（ending_strength < 7.5 の場合）
+    if score.get("ending_strength", 10) < 7.5:
+        logger.info("ラスト専門エージェント起動")
+        body = _strengthen_ending(plan, body, genre)
+
+    # 冒頭専門エージェント（全スコア低め or readability低い場合）
+    if overall < 8.0 or score.get("readability", 10) < 7.0:
+        logger.info("冒頭専門エージェント起動")
+        body = _strengthen_opening(plan, body, genre)
+
     title = plan.get("title", "")
-    logger.info(f"generate_novel 完了: title={title}, body={len(body)}字")
+    logger.info(f"generate_novel 完了: title={title}, body={len(body)}字, score={overall}")
     return body, title
 
 
