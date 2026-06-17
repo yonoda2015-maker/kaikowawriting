@@ -17,6 +17,25 @@ from cache import rss_cache, trend_cache
 
 load_dotenv(override=True)
 
+
+def _safe_json(raw: str, fallback: object = None) -> object:
+    """Claudeのレスポンスから安全にJSONをパース。失敗時はfallbackを返す。"""
+    if fallback is None:
+        fallback = {}
+    text = re.sub(r'```[a-z]*\n?', '', raw).strip()
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        pass
+    m = re.search(r'\{[\s\S]+\}', text)
+    if m:
+        try:
+            return json.loads(m.group())
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return fallback
+
+
 GENRE_DESCRIPTIONS = {
     "都市伝説・未解決事件": "都市伝説、未解決事件、失踪、陰謀",
     "ホラー体験談・怪談": "心霊体験、怪談、怪奇現象、呪い",
@@ -207,11 +226,7 @@ def _auto_correct_and_purify(text: str, genre: str = "") -> str:
 
     try:
         censor_raw = _call_claude(meta_prompt, max_tokens=150)
-        try:
-            censor = json.loads(censor_raw)
-        except json.JSONDecodeError:
-            m = re.search(r'\{[^{}]+\}', censor_raw)
-            censor = json.loads(m.group()) if m else {"is_valid": True}
+        censor = _safe_json(censor_raw, {"is_valid": True, "issue": "", "fix_instruction": ""})
 
         if not censor.get("is_valid", True):
             fix_inst = censor.get("fix_instruction", "")
@@ -375,11 +390,7 @@ def verify_horror_logic(
 
     try:
         tl_raw = _call_claude(timeline_prompt, max_tokens=600)
-        try:
-            tl = json.loads(tl_raw)
-        except json.JSONDecodeError:
-            m = re.search(r'\{[\s\S]+\}', tl_raw)
-            tl = json.loads(m.group()) if m else {"events": [], "contradictions": []}
+        tl = _safe_json(tl_raw, {"events": [], "contradictions": []})
 
         contradictions = tl.get("contradictions", [])
         if contradictions:
@@ -705,11 +716,7 @@ def _design_theme(genre: str, idea: str, length_type: str, horror_level: int = 3
 }}"""
 
     raw = _call_claude(prompt, max_tokens=1800)
-    try:
-        plan = json.loads(raw)
-    except json.JSONDecodeError:
-        m = re.search(r'\{[\s\S]+\}', raw)
-        plan = json.loads(m.group()) if m else {}
+    plan = _safe_json(raw)
     logger.info(f"テーマ設計完了: title={plan.get('title', '?')}, hook={plan.get('core_hook', '?')[:30]}")
     return plan
 
@@ -800,11 +807,7 @@ def _design_structure(plan: dict, length_type: str) -> dict:
 条件：各章に明確な役割・中盤停滞させない・伏線回収場所を明確に・ラストへ段階的に情報開示"""
 
     raw = _call_claude(prompt, max_tokens=1500)
-    try:
-        structure = json.loads(raw)
-    except json.JSONDecodeError:
-        m = re.search(r'\{[\s\S]+\}', raw)
-        structure = json.loads(m.group()) if m else {"length_type": length_type}
+    structure = _safe_json(raw, {"length_type": length_type})
     logger.info(f"構成設計完了: type={length_type}")
     return structure
 
@@ -1002,11 +1005,7 @@ def _update_chapter_summary(chapter_text: str, prev_state: dict) -> dict:
 }}"""
 
     raw = _call_claude(prompt, max_tokens=600)
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        m = re.search(r'\{[\s\S]+\}', raw)
-        return json.loads(m.group()) if m else prev_state
+    return _safe_json(raw, prev_state)
 
 
 def _write_long_novel(
@@ -1085,11 +1084,7 @@ def _final_edit_two_stage(plan: dict, structure: dict, draft: str, char_count: i
 }}"""
 
     issues_raw = _call_claude(check_prompt, max_tokens=800)
-    try:
-        issues = json.loads(issues_raw)
-    except json.JSONDecodeError:
-        m = re.search(r'\{[\s\S]+\}', issues_raw)
-        issues = json.loads(m.group()) if m else {}
+    issues = _safe_json(issues_raw, {})
 
     has_issues = any(v for v in issues.values() if isinstance(v, list) and v)
 
@@ -1260,11 +1255,7 @@ def _strengthen_opening(plan: dict, body: str, genre: str) -> str:
 {{"needs_fix": true/false, "reason": "理由"}}"""
 
     raw = _call_claude(check_prompt, max_tokens=150)
-    try:
-        check = json.loads(raw)
-    except json.JSONDecodeError:
-        m = re.search(r'\{[\s\S]+\}', raw)
-        check = json.loads(m.group()) if m else {"needs_fix": False}
+    check = _safe_json(raw, {"needs_fix": False})
 
     if not check.get("needs_fix"):
         return body
@@ -2329,11 +2320,7 @@ def generate_tips_pipeline(
 }}"""
 
     raw_decomp = _call_claude(decompose_prompt, max_tokens=900)
-    try:
-        state: dict = json.loads(raw_decomp)
-    except json.JSONDecodeError:
-        m = re.search(r'\{[\s\S]+\}', raw_decomp)
-        state = json.loads(m.group()) if m else {}
+    state: dict = _safe_json(raw_decomp, {})
 
     title             = state.get("title", "無題")
     alive_characters  = state.get("alive_characters", [])
@@ -2440,11 +2427,7 @@ def generate_tips_pipeline(
 {{"is_valid": false, "feedback": "50 字以内で修正点を記述"}}"""
 
         censor_raw = _call_claude(censor_prompt, max_tokens=120)
-        try:
-            censor: dict = json.loads(censor_raw)
-        except json.JSONDecodeError:
-            m2 = re.search(r'\{[^{}]+\}', censor_raw)
-            censor = json.loads(m2.group()) if m2 else {"is_valid": True, "feedback": ""}
+        censor: dict = _safe_json(censor_raw, {"is_valid": True, "feedback": ""})
 
         if not censor.get("is_valid", True):
             feedback = censor.get("feedback", "")
