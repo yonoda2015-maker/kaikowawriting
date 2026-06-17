@@ -1125,47 +1125,61 @@ def _score_quality(plan: dict, body: str, genre: str) -> dict:
         {genre_fit, originality, structure, character_consistency,
          ending_strength, readability, overall_score, needs_rewrite, main_weakness}
     """
-    score_prompt = f"""以下の小説/ホラー作品を厳格に採点せよ。採点基準を厳しく保つこと（7点以上は本当に良い作品のみ）。
+    # 長文の場合はサンプリング（冒頭+末尾600字）してトークン節約
+    body_sample = (body[:600] + "\n…中略…\n" + body[-600:]) if len(body) > 1400 else body
+
+    score_prompt = f"""以下の小説/ホラー作品を厳格に採点せよ。採点は厳しく（7点台=良作、8点台=優秀、9点台=傑作）。
 
 【ジャンル】{genre}
-【作品設計書】
-{json.dumps(plan, ensure_ascii=False, indent=2)}
+【作品設計書（抜粋）】
+core_hook: {plan.get('core_hook','')}
+ending_twist: {plan.get('ending_twist','')}
+genre_quality_rules: {json.dumps(plan.get('genre_quality_rules',[]), ensure_ascii=False)}
+failure_patterns: {json.dumps(plan.get('failure_patterns',[]), ensure_ascii=False)}
 
 【本文】
-{body}
+{body_sample}
 
-以下のJSONのみ出力せよ（他の文字は一切不要）：
-{{
-  "genre_fit": <0-10>,
-  "originality": <0-10>,
-  "structure": <0-10>,
-  "character_consistency": <0-10>,
-  "ending_strength": <0-10>,
-  "readability": <0-10>,
-  "overall_score": <0-10の平均>,
-  "needs_rewrite": <true/false>,
-  "main_weakness": "<最も改善が必要な点を1文で>"
-}}
+必ず以下のJSON形式のみ出力せよ（```や説明文は絶対に含めるな）：
+{{"genre_fit":7,"originality":7,"structure":7,"character_consistency":7,"ending_strength":7,"readability":7,"overall_score":7.0,"needs_rewrite":false,"main_weakness":"なし"}}
+
+上記の形式で、各数値を実際のスコア（整数0〜10）に、overall_scoreを6項目の平均（小数1桁）に、needs_rewriteをtrue/falseに、main_weaknessを具体的な文字列に置き換えて出力せよ。
 
 採点基準：
 - genre_fit: ジャンルの恐怖・笑い・感情の質感が正確か
-- originality: 「よくあるパターン」を超えた独自の仕掛けがあるか
+- originality: よくあるパターンを超えた独自の仕掛けがあるか
 - structure: 伏線回収・ペーシング・転換点が機能しているか
 - character_consistency: キャラの行動・感情が一貫しているか
-- ending_strength: ラストが心に刺さるか（ホラーなら余韻・恐怖、面白怖いならカタルシス）
-- readability: AIっぽさがなく自然に読めるか、説明過多でないか"""
+- ending_strength: ラストが心に刺さるか
+- readability: AIっぽさがなく自然に読めるか"""
 
-    raw = _call_claude(score_prompt, max_tokens=400)
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        m = re.search(r'\{[\s\S]+\}', raw)
-        if m:
-            try:
-                return json.loads(m.group())
-            except json.JSONDecodeError:
-                pass
-    return {"overall_score": 7.5, "needs_rewrite": False, "main_weakness": "", "ending_strength": 7}
+    raw = _call_claude(score_prompt, max_tokens=200)
+    # コードブロック記法を除去
+    raw = re.sub(r'```[a-z]*\n?', '', raw).strip()
+
+    def _parse_score(text: str) -> dict | None:
+        try:
+            d = json.loads(text)
+            # 型の正規化（Claudeが文字列で返す場合がある）
+            for k in ["genre_fit","originality","structure","character_consistency","ending_strength","readability"]:
+                d[k] = float(d.get(k, 7))
+            d["overall_score"] = float(d.get("overall_score", 7.0))
+            d["needs_rewrite"] = bool(d.get("needs_rewrite", False))
+            d["main_weakness"] = str(d.get("main_weakness", ""))
+            return d
+        except (json.JSONDecodeError, ValueError, TypeError):
+            return None
+
+    result = _parse_score(raw)
+    if result:
+        return result
+    m = re.search(r'\{[\s\S]+?\}', raw)
+    if m:
+        result = _parse_score(m.group())
+        if result:
+            return result
+    return {"overall_score": 7.5, "needs_rewrite": False, "main_weakness": "", "ending_strength": 7.0,
+            "genre_fit": 7.0, "originality": 7.0, "structure": 7.0, "character_consistency": 7.0, "readability": 7.0}
 
 
 def _strengthen_ending(plan: dict, body: str, genre: str) -> str:
