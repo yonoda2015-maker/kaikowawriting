@@ -126,7 +126,7 @@ QUALITY_BOOST_RULES = """
 """
 
 
-def _call_claude(prompt: str, max_tokens: int = 2000, retries: int = 2) -> str:
+def _call_claude(prompt: str, max_tokens: int = 2000, retries: int = 2, min_chars: int = 5) -> str:
     """
     Claude APIを呼び出す。
     - APIキー未設定は即座にValueError
@@ -150,7 +150,7 @@ def _call_claude(prompt: str, max_tokens: int = 2000, retries: int = 2) -> str:
                 messages=[{"role": "user", "content": prompt}],
             )
             raw = message.content[0].text
-            result = validate_claude_output(raw, min_chars=5)
+            result = validate_claude_output(raw, min_chars=min_chars)
             if not result.valid:
                 raise ValueError(f"Claude出力が無効: {result.errors}")
             for w in result.warnings:
@@ -1226,7 +1226,7 @@ def _strengthen_ending(plan: dict, body: str, genre: str) -> str:
 {json.dumps(endings, ensure_ascii=False)}
 
 AまたはBまたはCとだけ答えよ。"""
-    choice = _call_claude(pick_prompt, max_tokens=10).strip().upper()
+    choice = _call_claude(pick_prompt, max_tokens=10, min_chars=1).strip().upper()
     best = endings.get(choice, endings.get("A", ""))
 
     if best:
