@@ -36,6 +36,12 @@ from agents import (
     generate_sns_one_shot, generate_tips_pipeline,
     STYLE_ROTATION,
 )
+from multi_agent import (
+    multi_agent_generate_novel,
+    save_buzz_learning,
+    load_top_buzz_patterns,
+)
+DB_PATH = Path(__file__).parent / "kowamoshiro.db"
 from threads_api import post_to_threads
 from auth import check_login, logout, is_auth_enabled
 
@@ -456,8 +462,8 @@ def _make_editor_html(step: int, total: int, label: str, lang: str = "ja") -> st
 </div>"""
 
 
-def run_novel_with_progress(genre, idea, chars, x_safe, style_hint, horror_level, lang):
-    """かわいいねこ編集長進捗UIつきで小説を生成する。"""
+def run_novel_with_progress(genre, idea, chars, x_safe, style_hint, horror_level, lang, use_multi_agent: bool = True):
+    """ねこ編集長進捗UIつきで小説を生成する。マルチエージェントモード対応。"""
     progress_slot = st.empty()
 
     def cb(step, total, label):
@@ -466,11 +472,25 @@ def run_novel_with_progress(genre, idea, chars, x_safe, style_hint, horror_level
             unsafe_allow_html=True,
         )
 
-    result = generate_novel(
-        genre, idea, chars,
-        x_safe=x_safe, style_hint=style_hint, horror_level=horror_level,
-        output_lang=lang, progress_cb=cb,
-    )
+    if use_multi_agent:
+        top_patterns = load_top_buzz_patterns(str(DB_PATH))
+        result = multi_agent_generate_novel(
+            genre, idea, chars,
+            x_safe=x_safe, style_hint=style_hint, horror_level=horror_level,
+            output_lang=lang, top_patterns=top_patterns, progress_cb=cb,
+        )
+        # バズスコア保存
+        if result and result[0]:
+            from agents import predict_viral_score, calc_horror_score
+            buzz = predict_viral_score(result[0], genre, style_hint or "default", top_patterns)
+            save_buzz_learning(str(DB_PATH), genre, style_hint or "default", result[0], buzz, won_ab=True)
+    else:
+        result = generate_novel(
+            genre, idea, chars,
+            x_safe=x_safe, style_hint=style_hint, horror_level=horror_level,
+            output_lang=lang, progress_cb=cb,
+        )
+
     done_label = "完成しました！" if lang == "ja" else "Done!"
     progress_slot.markdown(
         _make_editor_html(9, 9, done_label, lang),
@@ -997,6 +1017,15 @@ with tab_novel:
                             logger.error(f"TIPS error: {e}"); st.error(f"生成エラー: {e}")
         else:
             st.session_state["tips_mode_active"] = False
+            use_multi_n = st.toggle(
+                "🤖 マルチエージェントモード（推奨）",
+                value=True,
+                key="novel_multi_agent",
+                help="リサーチャー・プランナー・ライター・編集者・ファクトチェッカー・バズ分析の6エージェントが協議して執筆します。生成時間が長くなりますが品質が向上します。",
+            )
+            if use_multi_n:
+                st.caption("🔬 リサーチ → 💬 エージェント協議 → ✍️ 執筆 → 🔍 矛盾チェック → ✂️ 編集 → 📊 バズ分析 の順で生成します")
+
             if st.button(f"🔥 小説を生成する（約{novel_chars_input:,}字）",
                          type="primary", key="novel_generate", use_container_width=True, disabled=not api_key_set()):
                 if not require_api_key():
@@ -1007,7 +1036,7 @@ with tab_novel:
                     spin_msg = f"小説を書いています...（約{novel_chars_input:,}字）" if output_lang_n == "ja" else f"Writing story (~{novel_chars_input:,} chars)..."
                     with st.spinner(spin_msg):
                         try:
-                            cn, title_n = run_novel_with_progress(genre_n, idea_text_n, novel_chars_input, get_x_safe(), style_hint_n, horror_level_n, output_lang_n)
+                            cn, title_n = run_novel_with_progress(genre_n, idea_text_n, novel_chars_input, get_x_safe(), style_hint_n, horror_level_n, output_lang_n, use_multi_agent=use_multi_n)
                             if st.session_state.get("novel_note_url") or st.session_state.get("novel_aff_url"):
                                 cn = add_monetization(cn, "novel", st.session_state.get("novel_aff_url", ""), st.session_state.get("novel_note_url", ""))
                             st.session_state.update({"novel_content": cn, "novel_pending": cn,
