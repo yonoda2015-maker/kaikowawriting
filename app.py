@@ -380,10 +380,11 @@ st.markdown("---")
 import streamlit.components.v1 as _components
 
 def _make_editor_html(step: int, total: int, label: str, lang: str = "ja") -> str:
-    """ドットキャラ（ねこ編集長）がキャンバス上を歩き回る進捗HTML。"""
+    """DQチビキャラ風ねこ編集長がキャンバス上を歩き回る進捗HTML。"""
     pct = int(step / total * 100)
     bar_color = "#ff6b6b" if pct < 40 else "#ffd93d" if pct < 75 else "#6bcb77"
     title = "Editor Neko is working..." if lang == "en" else "ねこ編集長が作業中..."
+    done_title = "Done! Meow!" if lang == "en" else "完成ニャ！✨"
     done_js = "true" if step >= total else "false"
     step_text = f"{label} &nbsp;·&nbsp; Step {step}/{total}"
 
@@ -392,134 +393,129 @@ def _make_editor_html(step: int, total: int, label: str, lang: str = "ja") -> st
 <style>
 *{{margin:0;padding:0;box-sizing:border-box;}}
 body{{background:#0a0a18;font-family:'Courier New',monospace;overflow:hidden;}}
-#wrap{{width:100%;height:170px;position:relative;background:linear-gradient(180deg,#0a0a18 0%,#10102a 100%);border:1px solid #2a2a4a;border-radius:10px;overflow:hidden;}}
-.star{{position:absolute;width:2px;height:2px;background:#fff;border-radius:50%;opacity:0.5;animation:tw 3s infinite alternate;}}
-@keyframes tw{{0%{{opacity:0.15}}100%{{opacity:0.75}}}}
-#floor{{position:absolute;bottom:0;left:0;right:0;height:24px;background:linear-gradient(0deg,#12123a 0%,#1a1a44 100%);border-top:2px solid #3a3a7a;}}
-#floor::before{{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:repeating-linear-gradient(90deg,#5a5aaa 0,#5a5aaa 4px,transparent 4px,transparent 12px);opacity:0.25;}}
-#bubble{{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:#14143a;border:1px solid #6060cc;border-radius:8px;padding:4px 14px;color:#aaaaee;font-size:11px;white-space:nowrap;}}
-#bubble::after{{content:'';position:absolute;bottom:-7px;left:50%;transform:translateX(-50%);border:4px solid transparent;border-top-color:#6060cc;}}
-#sl{{position:absolute;top:34px;left:50%;transform:translateX(-50%);color:#5555aa;font-size:10px;white-space:nowrap;}}
-#pt{{position:absolute;bottom:4px;left:14px;right:14px;height:5px;background:#1e1e44;border-radius:3px;overflow:hidden;}}
-#pf{{height:100%;width:{pct}%;background:{bar_color};border-radius:3px;}}
-#pl{{position:absolute;bottom:11px;right:14px;color:{bar_color};font-size:10px;font-weight:bold;}}
-canvas{{position:absolute;bottom:24px;image-rendering:pixelated;image-rendering:crisp-edges;}}
+#wrap{{width:100%;height:178px;position:relative;background:#0a0a18;border:1px solid #2a2a5a;border-radius:12px;overflow:hidden;}}
+.star{{position:absolute;background:#fff;border-radius:50%;animation:tw 3s infinite alternate;}}
+@keyframes tw{{0%{{opacity:.1}}100%{{opacity:.8}}}}
+#ground{{position:absolute;bottom:0;left:0;right:0;height:28px;background:#14143a;border-top:3px solid #3838a0;}}
+#ground::after{{content:'';position:absolute;top:4px;left:0;right:0;height:2px;background:repeating-linear-gradient(90deg,#5050b0 0,#5050b0 6px,transparent 6px,transparent 18px);opacity:.3;}}
+#bub{{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:#0e0e2e;border:2px solid #6060d0;border-radius:8px;padding:4px 14px;color:#b0b0ff;font:bold 11px 'Courier New',monospace;white-space:nowrap;}}
+#bub::after{{content:'';position:absolute;bottom:-8px;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:#6060d0;}}
+#lbl{{position:absolute;top:36px;left:50%;transform:translateX(-50%);color:#4848a0;font:10px 'Courier New',monospace;white-space:nowrap;}}
+#bar-wrap{{position:absolute;bottom:5px;left:14px;right:14px;height:7px;background:#151540;border-radius:4px;overflow:hidden;}}
+#bar{{height:100%;width:{pct}%;background:{bar_color};border-radius:4px;}}
+#pct{{position:absolute;bottom:14px;right:14px;color:{bar_color};font:bold 10px 'Courier New',monospace;}}
+#cat-div{{position:absolute;bottom:28px;image-rendering:pixelated;}}
+canvas{{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}}
 </style></head>
 <body>
 <div id="wrap">
-  <div class="star" style="top:12%;left:4%;animation-delay:0s"></div>
-  <div class="star" style="top:28%;left:18%;animation-delay:0.8s"></div>
-  <div class="star" style="top:8%;left:40%;animation-delay:1.5s"></div>
-  <div class="star" style="top:20%;left:62%;animation-delay:0.3s"></div>
-  <div class="star" style="top:30%;left:82%;animation-delay:1.1s"></div>
-  <div class="star" style="top:14%;left:93%;animation-delay:0.6s"></div>
-  <div id="bubble">{title}</div>
-  <div id="sl">{step_text}</div>
-  <canvas id="cat"></canvas>
-  <div id="floor"></div>
-  <div id="pt"><div id="pf"></div></div>
-  <div id="pl">{pct}%</div>
+  <div class="star" style="width:2px;height:2px;top:8%;left:5%;animation-delay:0s"></div>
+  <div class="star" style="width:3px;height:3px;top:22%;left:18%;animation-delay:.9s"></div>
+  <div class="star" style="width:2px;height:2px;top:6%;left:42%;animation-delay:1.6s"></div>
+  <div class="star" style="width:2px;height:2px;top:18%;left:65%;animation-delay:.4s"></div>
+  <div class="star" style="width:3px;height:3px;top:28%;left:84%;animation-delay:1.2s"></div>
+  <div class="star" style="width:2px;height:2px;top:12%;left:95%;animation-delay:.7s"></div>
+  <div id="bub">{title}</div>
+  <div id="lbl">{step_text}</div>
+  <div id="cat-div"><canvas id="cv"></canvas></div>
+  <div id="ground"></div>
+  <div id="bar-wrap"><div id="bar"></div></div>
+  <div id="pct">{pct}%</div>
 </div>
 <script>
-const SCALE=3,PW=14,PH=18;
-const cv=document.getElementById('cat'),ctx=cv.getContext('2d');
-cv.width=PW*SCALE;cv.height=PH*SCALE;
-cv.style.width=(PW*SCALE)+'px';cv.style.height=(PH*SCALE)+'px';
-const C={{_:null,O:'#e8834a',o:'#c05c28',W:'#f8e8d8',E:'#1a1a1a',N:'#e87c8a',p:'#f5a0b0',T:'#d06830'}};
-const FA=[
-  '__OO___OO_____',
-  '_OOOO_OOOO____',
-  '_OOpOOOpO_____',
-  '_OOOOOOOOO____',
-  'OOpOONOOpO____',
-  '_OOOOOOOO_____',
-  '_OWWOOOWWO____',
-  '___OOOOOOO____',
-  '___OOOOOOOTTT_',
-  '___OOOOOOOTTT_',
-  '___WWWWWWW____',
-  '___OOOOOOO____',
-  '___OO___OO____',
-  '___OO___OO____',
-  '__oOO___OOo___',
-  '__o_______o___',
-  '______________',
-  '______________',
+const S=4,COLS=12,ROWS=24;
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
+cv.width=COLS*S;cv.height=ROWS*S;
+cv.style.width=(COLS*S)+'px';cv.style.height=(ROWS*S)+'px';
+const P={{_:null,K:'#111122',O:'#e07828',o:'#903010',h:'#f4b060',W:'#fef0d0',w:'#c8b888',P:'#f080a0',p:'#b03060',S:'#ffffff',E:'#111122',B:'#2050d0',b:'#0a28a0',l:'#7090e8'}};
+const HEAD=[
+  '__KK____KK__',
+  '_KPpK__KPpK_',
+  '_KOOK__KOOK_',
+  'KhOOOOOOOOhK',
+  'KOSSOOOOSSOK',
+  'KOSEOOOOESOK',
+  'KOSSOOOOSSOK',
+  'KOOOWPPWOOoK',
+  'KWOOOooOOOWK',
+  '_KOOOOOOOOK_',
+  '__KOOOOOoK__',
 ];
-const FB=[
-  '__OO___OO_____',
-  '_OOOO_OOOO____',
-  '_OOpOOOpO_____',
-  '_OOOOOOOOO____',
-  'OOpOONOOpO____',
-  '_OOOOOOOO_____',
-  '_OWWOOOWWO____',
-  '___OOOOOOO____',
-  '___OOOOOOO____',
-  '___OOOOOOOTTT_',
-  '___WWWWWWWTTT_',
-  '___OOOOOOO____',
-  '___OO___OO____',
-  '___OO___OO____',
-  '__OOo___oOO___',
-  '_o__________o_',
-  '______________',
-  '______________',
+const BODY=[
+  '_KBBbBBBBbK_',
+  'KBBlBWWWBlBK',
+  'KBBlBWWWBlBK',
+  'KBBlBWWWBlBK',
+  '_KBBbBBBBbK_',
+  '__KKKKKKKK__',
 ];
-const FD=[
-  '__OO___OO_____',
-  '_OOOO_OOOO____',
-  '_OOpOOOpO_____',
-  '_OOOOOOOOO____',
-  'OOpOONOOpO____',
-  '_OOOOOOOO_____',
-  '_OWWOOOWWO____',
-  '_OOOOOOOOO____',
-  'OO_OOOOOOO_OO_',
-  'O___OOOOOOO__O',
-  '____WWWWWWW___',
-  '____OOOOOOO___',
-  '____OO___OO___',
-  '___oOO___OOo__',
-  '____OO___OO___',
-  '______________',
-  '______________',
-  '______________',
+const LEGS_A=[
+  '__KOK__KOK__',
+  '__KOK__KOK__',
+  '__KOK__KOK__',
+  '__KWK__KOK__',
+  '__KWK__KOK__',
+  '__KKK__KKK__',
+  '____________',
 ];
+const LEGS_B=[
+  '__KOK__KOK__',
+  '__KOK__KOK__',
+  '__KOK__KOK__',
+  '__KOK__KWK__',
+  '__KOK__KWK__',
+  '__KKK__KKK__',
+  '____________',
+];
+const LEGS_D=[
+  '__KOK__KOK__',
+  '__KOK__KOK__',
+  '__KOK__KOK__',
+  '__KOK__KOK__',
+  '__KWK__KWK__',
+  '__KKK__KKK__',
+  '____________',
+];
+function mkFrame(legs){{return[...HEAD,...BODY,...legs];}}
+const FA=mkFrame(LEGS_A),FB=mkFrame(LEGS_B),FD=mkFrame(LEGS_D);
 function draw(grid,flip){{
   ctx.clearRect(0,0,cv.width,cv.height);
   if(flip){{ctx.save();ctx.scale(-1,1);ctx.translate(-cv.width,0);}}
-  for(let r=0;r<grid.length;r++)for(let c=0;c<grid[r].length;c++){{
-    const ch=grid[r][c];if(ch==='_')continue;
-    ctx.fillStyle=C[ch]||'#e8834a';
-    ctx.fillRect(c*SCALE,r*SCALE,SCALE,SCALE);
+  for(let r=0;r<grid.length;r++){{
+    const row=grid[r];
+    for(let c=0;c<row.length;c++){{
+      const col=P[row[c]];if(!col)continue;
+      ctx.fillStyle=col;
+      ctx.fillRect(c*S,r*S,S,S);
+    }}
   }}
   if(flip)ctx.restore();
 }}
 const wrap=document.getElementById('wrap');
-let x=30,dir=1,tick=0;
+const bubEl=document.getElementById('bub');
+let catX=30,dir=1,tick=0;
 const isDone={done_js};
+if(isDone){{bubEl.textContent='{done_title}';}}
 function loop(){{
   tick++;
-  const W=wrap.offsetWidth||600,catW=PW*SCALE;
+  const W=wrap.offsetWidth||600,cw=COLS*S;
   if(isDone){{
-    const b=Math.abs(Math.sin(tick*0.12))*8;
-    cv.style.bottom=(24+b)+'px';
-    cv.style.left=((W-catW)/2)+'px';
+    const bounce=Math.abs(Math.sin(tick*0.13))*10;
+    document.getElementById('cat-div').style.bottom=(28+bounce)+'px';
+    document.getElementById('cat-div').style.left=((W-cw)/2)+'px';
     draw(FD,false);
   }}else{{
-    x+=dir*1.3;
-    const mx=W-catW-20;
-    if(x>=mx){{x=mx;dir=-1;}}
-    if(x<=20){{x=20;dir=1;}}
-    cv.style.left=x+'px';cv.style.bottom='24px';
-    draw(Math.floor(tick/9)%2===0?FA:FB,dir===-1);
+    catX+=dir*1.4;
+    if(catX>=W-cw-16){{catX=W-cw-16;dir=-1;}}
+    if(catX<=16){{catX=16;dir=1;}}
+    document.getElementById('cat-div').style.left=catX+'px';
+    document.getElementById('cat-div').style.bottom='28px';
+    draw(Math.floor(tick/10)%2===0?FA:FB,dir===-1);
   }}
   requestAnimationFrame(loop);
 }}
 loop();
-</script>
-</body></html>"""
+</script></body></html>"""
 
 
 def run_novel_with_progress(genre, idea, chars, x_safe, style_hint, horror_level, lang):
