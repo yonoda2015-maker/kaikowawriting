@@ -380,7 +380,7 @@ st.markdown("---")
 import streamlit.components.v1 as _components
 
 def _make_editor_html(step: int, total: int, label: str, lang: str = "ja") -> str:
-    """DQチビキャラ風ねこ編集長がキャンバス上を歩き回る進捗HTML。"""
+    """かわいいSVGねこ編集長が歩き回る進捗HTML。"""
     pct = int(step / total * 100)
     bar_color = "#ff6b6b" if pct < 40 else "#ffd93d" if pct < 75 else "#6bcb77"
     title = "Editor Neko is working..." if lang == "en" else "ねこ編集長が作業中..."
@@ -392,125 +392,113 @@ def _make_editor_html(step: int, total: int, label: str, lang: str = "ja") -> st
 <html><head><meta charset="utf-8">
 <style>
 *{{margin:0;padding:0;box-sizing:border-box;}}
-body{{background:#0a0a18;font-family:'Courier New',monospace;overflow:hidden;}}
-#wrap{{width:100%;height:178px;position:relative;background:#0a0a18;border:1px solid #2a2a5a;border-radius:12px;overflow:hidden;}}
-.star{{position:absolute;background:#fff;border-radius:50%;animation:tw 3s infinite alternate;}}
-@keyframes tw{{0%{{opacity:.1}}100%{{opacity:.8}}}}
-#ground{{position:absolute;bottom:0;left:0;right:0;height:28px;background:#14143a;border-top:3px solid #3838a0;}}
-#ground::after{{content:'';position:absolute;top:4px;left:0;right:0;height:2px;background:repeating-linear-gradient(90deg,#5050b0 0,#5050b0 6px,transparent 6px,transparent 18px);opacity:.3;}}
-#bub{{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:#0e0e2e;border:2px solid #6060d0;border-radius:8px;padding:4px 14px;color:#b0b0ff;font:bold 11px 'Courier New',monospace;white-space:nowrap;}}
-#bub::after{{content:'';position:absolute;bottom:-8px;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:#6060d0;}}
-#lbl{{position:absolute;top:36px;left:50%;transform:translateX(-50%);color:#4848a0;font:10px 'Courier New',monospace;white-space:nowrap;}}
-#bar-wrap{{position:absolute;bottom:5px;left:14px;right:14px;height:7px;background:#151540;border-radius:4px;overflow:hidden;}}
-#bar{{height:100%;width:{pct}%;background:{bar_color};border-radius:4px;}}
-#pct{{position:absolute;bottom:14px;right:14px;color:{bar_color};font:bold 10px 'Courier New',monospace;}}
-#cat-div{{position:absolute;bottom:28px;image-rendering:pixelated;}}
-canvas{{display:block;image-rendering:pixelated;image-rendering:crisp-edges;}}
+body{{background:#0a0a18;overflow:hidden;}}
+#wrap{{width:100%;height:190px;background:#0a0a18;border:2px solid #3030a0;border-radius:14px;overflow:hidden;position:relative;}}
+.star{{position:absolute;border-radius:50%;background:#fff;animation:tw 2.5s ease-in-out infinite alternate;}}
+@keyframes tw{{from{{opacity:.08}}to{{opacity:.7}}}}
+#ground{{position:absolute;bottom:0;left:0;right:0;height:30px;background:#181858;border-top:2px solid #4040c0;}}
+#bubble{{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:#fff;border:2px solid #e090c0;border-radius:20px;padding:5px 18px;font:bold 12px sans-serif;color:#c050a0;white-space:nowrap;}}
+#bubble::after{{content:'';position:absolute;bottom:-10px;left:50%;transform:translateX(-50%);border:6px solid transparent;border-top-color:#e090c0;}}
+#step-lbl{{position:absolute;top:42px;left:50%;transform:translateX(-50%);font:11px 'Courier New',monospace;color:#8080cc;white-space:nowrap;}}
+#bar-bg{{position:absolute;bottom:6px;left:16px;right:16px;height:8px;background:#0c0c38;border-radius:8px;overflow:hidden;}}
+#bar-fg{{height:100%;width:{pct}%;background:{bar_color};border-radius:8px;}}
+#bar-pct{{position:absolute;bottom:16px;right:16px;font:bold 11px 'Courier New',monospace;color:{bar_color};}}
+#cat-wrap{{position:absolute;bottom:30px;}}
 </style></head>
 <body>
 <div id="wrap">
-  <div class="star" style="width:2px;height:2px;top:8%;left:5%;animation-delay:0s"></div>
-  <div class="star" style="width:3px;height:3px;top:22%;left:18%;animation-delay:.9s"></div>
-  <div class="star" style="width:2px;height:2px;top:6%;left:42%;animation-delay:1.6s"></div>
-  <div class="star" style="width:2px;height:2px;top:18%;left:65%;animation-delay:.4s"></div>
-  <div class="star" style="width:3px;height:3px;top:28%;left:84%;animation-delay:1.2s"></div>
-  <div class="star" style="width:2px;height:2px;top:12%;left:95%;animation-delay:.7s"></div>
-  <div id="bub">{title}</div>
-  <div id="lbl">{step_text}</div>
-  <div id="cat-div"><canvas id="cv"></canvas></div>
+  <div class="star" style="width:2px;height:2px;top:9%;left:6%;animation-delay:0s"></div>
+  <div class="star" style="width:3px;height:3px;top:20%;left:20%;animation-delay:.8s"></div>
+  <div class="star" style="width:2px;height:2px;top:7%;left:45%;animation-delay:1.5s"></div>
+  <div class="star" style="width:2px;height:2px;top:25%;left:68%;animation-delay:.4s"></div>
+  <div class="star" style="width:3px;height:3px;top:15%;left:88%;animation-delay:1.1s"></div>
+  <div id="bubble">{title}</div>
+  <div id="step-lbl">{step_text}</div>
+  <div id="cat-wrap">
+    <svg id="cat" xmlns="http://www.w3.org/2000/svg" width="60" height="80" viewBox="0 0 60 80">
+      <path id="tail" d="M30 68 Q18 72 16 62 Q14 54 22 54" stroke="#e07030" stroke-width="5" fill="none" stroke-linecap="round"/>
+      <ellipse cx="30" cy="62" rx="16" ry="12" fill="#f08030"/>
+      <ellipse cx="30" cy="60" rx="10" ry="8" fill="#fff0e0"/>
+      <ellipse id="leg-ll" cx="20" cy="73" rx="5" ry="4" fill="#e07030"/>
+      <ellipse id="leg-lr" cx="40" cy="73" rx="5" ry="4" fill="#e07030"/>
+      <g id="paw-l"><ellipse cx="18" cy="76" rx="4" ry="2.5" fill="#f09050"/></g>
+      <g id="paw-r"><ellipse cx="42" cy="76" rx="4" ry="2.5" fill="#f09050"/></g>
+      <g id="head-g">
+        <ellipse cx="30" cy="34" rx="20" ry="18" fill="#f08030"/>
+        <path d="M12 22 L8 10 L20 20 Z" fill="#f08030" stroke="#e07030" stroke-width="1"/>
+        <path d="M48 22 L52 10 L40 20 Z" fill="#f08030" stroke="#e07030" stroke-width="1"/>
+        <ellipse cx="15" cy="18" rx="5" ry="7" fill="#f8c0c0"/>
+        <ellipse cx="45" cy="18" rx="5" ry="7" fill="#f8c0c0"/>
+        <ellipse cx="22" cy="32" rx="8" ry="9" fill="white"/>
+        <ellipse cx="38" cy="32" rx="8" ry="9" fill="white"/>
+        <ellipse id="eye-l" cx="22" cy="34" rx="5.5" ry="6" fill="#3040c0"/>
+        <ellipse id="eye-r" cx="38" cy="34" rx="5.5" ry="6" fill="#3040c0"/>
+        <ellipse cx="22" cy="33" rx="3.5" ry="4.5" fill="#111"/>
+        <ellipse cx="38" cy="33" rx="3.5" ry="4.5" fill="#111"/>
+        <ellipse cx="21" cy="31" rx="1.5" ry="1.5" fill="white"/>
+        <ellipse cx="37" cy="31" rx="1.5" ry="1.5" fill="white"/>
+        <ellipse cx="30" cy="40" rx="3" ry="2" fill="#f06090"/>
+        <path d="M24 43 Q30 47 36 43" stroke="#c04070" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+        <line x1="12" y1="38" x2="24" y2="40" stroke="#c05010" stroke-width="1" opacity=".7"/>
+        <line x1="12" y1="41" x2="24" y2="41" stroke="#c05010" stroke-width="1" opacity=".7"/>
+        <line x1="48" y1="38" x2="36" y2="40" stroke="#c05010" stroke-width="1" opacity=".7"/>
+        <line x1="48" y1="41" x2="36" y2="41" stroke="#c05010" stroke-width="1" opacity=".7"/>
+        <ellipse cx="19" cy="36" rx="5" ry="3" fill="#f090b0" opacity=".5"/>
+        <ellipse cx="41" cy="36" rx="5" ry="3" fill="#f090b0" opacity=".5"/>
+      </g>
+      <g id="pencil-g">
+        <rect x="44" y="28" width="5" height="20" rx="2" fill="#f8d040" transform="rotate(30,46,38)"/>
+        <polygon points="0,-4 4,4 -4,4" fill="#e07030" transform="translate(52,44) rotate(30)"/>
+        <polygon points="0,-2 2,0 -2,0" fill="#ffd0a0" transform="translate(52,44) rotate(30)"/>
+      </g>
+    </svg>
+  </div>
   <div id="ground"></div>
-  <div id="bar-wrap"><div id="bar"></div></div>
-  <div id="pct">{pct}%</div>
+  <div id="bar-bg"><div id="bar-fg"></div></div>
+  <div id="bar-pct">{pct}%</div>
 </div>
 <script>
-const S=4,COLS=12,ROWS=24;
-const cv=document.getElementById('cv'),ctx=cv.getContext('2d');
-cv.width=COLS*S;cv.height=ROWS*S;
-cv.style.width=(COLS*S)+'px';cv.style.height=(ROWS*S)+'px';
-const P={{_:null,K:'#111122',O:'#e07828',o:'#903010',h:'#f4b060',W:'#fef0d0',w:'#c8b888',P:'#f080a0',p:'#b03060',S:'#ffffff',E:'#111122',B:'#2050d0',b:'#0a28a0',l:'#7090e8'}};
-const HEAD=[
-  '__KK____KK__',
-  '_KPpK__KPpK_',
-  '_KOOK__KOOK_',
-  'KhOOOOOOOOhK',
-  'KOSSOOOOSSOK',
-  'KOSEOOOOESOK',
-  'KOSSOOOOSSOK',
-  'KOOOWPPWOOoK',
-  'KWOOOooOOOWK',
-  '_KOOOOOOOOK_',
-  '__KOOOOOoK__',
-];
-const BODY=[
-  '_KBBbBBBBbK_',
-  'KBBlBWWWBlBK',
-  'KBBlBWWWBlBK',
-  'KBBlBWWWBlBK',
-  '_KBBbBBBBbK_',
-  '__KKKKKKKK__',
-];
-const LEGS_A=[
-  '__KOK__KOK__',
-  '__KOK__KOK__',
-  '__KOK__KOK__',
-  '__KWK__KOK__',
-  '__KWK__KOK__',
-  '__KKK__KKK__',
-  '____________',
-];
-const LEGS_B=[
-  '__KOK__KOK__',
-  '__KOK__KOK__',
-  '__KOK__KOK__',
-  '__KOK__KWK__',
-  '__KOK__KWK__',
-  '__KKK__KKK__',
-  '____________',
-];
-const LEGS_D=[
-  '__KOK__KOK__',
-  '__KOK__KOK__',
-  '__KOK__KOK__',
-  '__KOK__KOK__',
-  '__KWK__KWK__',
-  '__KKK__KKK__',
-  '____________',
-];
-function mkFrame(legs){{return[...HEAD,...BODY,...legs];}}
-const FA=mkFrame(LEGS_A),FB=mkFrame(LEGS_B),FD=mkFrame(LEGS_D);
-function draw(grid,flip){{
-  ctx.clearRect(0,0,cv.width,cv.height);
-  if(flip){{ctx.save();ctx.scale(-1,1);ctx.translate(-cv.width,0);}}
-  for(let r=0;r<grid.length;r++){{
-    const row=grid[r];
-    for(let c=0;c<row.length;c++){{
-      const col=P[row[c]];if(!col)continue;
-      ctx.fillStyle=col;
-      ctx.fillRect(c*S,r*S,S,S);
-    }}
-  }}
-  if(flip)ctx.restore();
-}}
 const wrap=document.getElementById('wrap');
-const bubEl=document.getElementById('bub');
-let catX=30,dir=1,tick=0;
+const catWrap=document.getElementById('cat-wrap');
+const bubEl=document.getElementById('bubble');
+const eyeL=document.getElementById('eye-l');
+const eyeR=document.getElementById('eye-r');
+const pencilG=document.getElementById('pencil-g');
+const tailPath=document.getElementById('tail');
+const pawL=document.getElementById('paw-l');
+const pawR=document.getElementById('paw-r');
+let catX=40,dir=1,tick=0;
 const isDone={done_js};
-if(isDone){{bubEl.textContent='{done_title}';}}
+if(isDone){{bubEl.textContent='{done_title}';bubEl.style.color='#e040a0';}}
 function loop(){{
   tick++;
-  const W=wrap.offsetWidth||600,cw=COLS*S;
+  const W=wrap.offsetWidth||600,catW=60;
   if(isDone){{
-    const bounce=Math.abs(Math.sin(tick*0.13))*10;
-    document.getElementById('cat-div').style.bottom=(28+bounce)+'px';
-    document.getElementById('cat-div').style.left=((W-cw)/2)+'px';
-    draw(FD,false);
+    const bx=Math.sin(tick*.05)*20;
+    catWrap.style.bottom=(30+Math.abs(Math.sin(tick*.1)*6))+'px';
+    catWrap.style.left=((W-catW)/2+bx)+'px';
+    eyeL.setAttribute('ry',Math.abs(Math.sin(tick*.08))<.1?1:6);
+    eyeR.setAttribute('ry',Math.abs(Math.sin(tick*.08))<.1?1:6);
+    pencilG.setAttribute('transform','rotate('+(Math.sin(tick*.15)*20)+',48,38)');
   }}else{{
-    catX+=dir*1.4;
-    if(catX>=W-cw-16){{catX=W-cw-16;dir=-1;}}
-    if(catX<=16){{catX=16;dir=1;}}
-    document.getElementById('cat-div').style.left=catX+'px';
-    document.getElementById('cat-div').style.bottom='28px';
-    draw(Math.floor(tick/10)%2===0?FA:FB,dir===-1);
+    catX+=dir*1.6;
+    if(catX>=W-catW-20){{catX=W-catW-20;dir=-1;}}
+    if(catX<=20){{catX=20;dir=1;}}
+    catWrap.style.left=catX+'px';
+    catWrap.style.bottom='30px';
+    const headBob=Math.sin(tick*.18)*2;
+    document.getElementById('head-g').setAttribute('transform','translate(0,'+headBob+')');
+    if(Math.floor(tick/12)%2===0){{
+      pawL.setAttribute('transform','translate(0,3) rotate(-15,18,76)');
+      pawR.setAttribute('transform','');
+    }}else{{
+      pawL.setAttribute('transform','');
+      pawR.setAttribute('transform','translate(0,3) rotate(15,42,76)');
+    }}
+    document.getElementById('cat').setAttribute('transform',dir===-1?'scale(-1,1) translate(-60,0)':'');
+    const ts=Math.sin(tick*.12)*12;
+    tailPath.setAttribute('d','M30 68 Q'+(18+ts)+' 72 '+(16+ts*.5)+' 62 Q14 54 22 54');
+    pencilG.setAttribute('transform','rotate('+(Math.sin(tick*.22)*10-5)+',48,38)');
   }}
   requestAnimationFrame(loop);
 }}
