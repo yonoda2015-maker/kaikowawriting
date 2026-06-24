@@ -1281,59 +1281,68 @@ def _strengthen_opening(plan: dict, body: str, genre: str) -> str:
 
 def generate_novel(genre: str, idea: str, char_count: int = 3000,
                    x_safe: bool = False, style_hint: str = "",
-                   horror_level: int = 3) -> tuple[str, str]:
+                   horror_level: int = 3, output_lang: str = "ja",
+                   progress_cb=None) -> tuple[str, str]:
     """v4.3 品質重視パイプライン＋スコアリング＋専門エージェント。
-    short/middle: ② テーマ設計 → ③ 構成 → ④ 一括生成 → ⑤ 2段階編集 → ⑥ スコア→専門強化
-    long:         ② テーマ設計 → ③ 構成 → ④ 章ごと生成＋章チェック → ⑤ 2段階編集 → ⑥ スコア→専門強化
-    → v3.2/v4.0 ガードレール
+    output_lang: "ja"=日本語（デフォルト）/ "en"=English
+    progress_cb: (step: int, total: int, label: str) を受け取るコールバック（UI進捗表示用）
     """
+    def _cb(step, total, label):
+        if progress_cb:
+            progress_cb(step, total, label)
+
+    lang_instr = "" if output_lang == "ja" else "\n\nIMPORTANT: Write the entire output in English only."
     length_type = _classify_length(char_count)
-    logger.info(f"generate_novel 開始: genre={genre}, chars={char_count}, type={length_type}")
+    logger.info(f"generate_novel 開始: genre={genre}, chars={char_count}, type={length_type}, lang={output_lang}")
+    total_steps = 9
 
-    # ② テーマ設計（reader_experience・failure_patterns・foreshadowing_map・style_rules）
+    _cb(1, total_steps, "テーマ設計中…" if output_lang == "ja" else "Designing theme…")
     plan = _design_theme(genre, idea, length_type, horror_level)
+    if lang_instr:
+        plan["_lang_instr"] = lang_instr
 
-    # ③ 文字数タイプ別構成設計
+    _cb(2, total_steps, "構成を組み立て中…" if output_lang == "ja" else "Building structure…")
     structure = _design_structure(plan, length_type)
 
-    # ④ 本文生成（long は章ごと、それ以外は一括）
+    _cb(3, total_steps, "本文を執筆中…" if output_lang == "ja" else "Writing draft…")
     if length_type == "long":
         draft = _write_long_novel(plan, structure, char_count, genre, style_hint, x_safe, horror_level)
     else:
-        draft = _write_body_from_plan(plan, structure, char_count, genre, style_hint, x_safe, horror_level)
+        draft = _write_body_from_plan(plan, structure, char_count, genre,
+                                      style_hint + lang_instr, x_safe, horror_level)
 
-    # ⑤ 2段階最終編集（整合性チェックJSON → リライト）
+    _cb(4, total_steps, "整合性チェック中…" if output_lang == "ja" else "Checking consistency…")
     body = _final_edit_two_stage(plan, structure, draft, char_count, genre)
 
-    # v3.2 自動修正ガードレール（Regex＋LLMメタ検閲）
+    _cb(5, total_steps, "AIっぽさを除去中…" if output_lang == "ja" else "Removing AI-ness…")
     body = _auto_correct_and_purify(body, genre)
 
-    # v4.0 三段階自動検証（タイムライン・職業規律・冗長NLP）
+    _cb(6, total_steps, "ロジック検証中…" if output_lang == "ja" else "Verifying logic…")
     body = auto_verify_and_fix(
         body, genre,
         _infer_occupations(body),
         plot_context=json.dumps(plan, ensure_ascii=False),
     )
 
-    # v4.3 品質スコアリング＋専門エージェント強化
+    _cb(7, total_steps, "品質スコアを採点中…" if output_lang == "ja" else "Scoring quality…")
     score = _score_quality(plan, body, genre)
     overall = score.get("overall_score", 7.5)
     logger.info(f"品質スコア: {score}")
 
     if overall < 7.0:
-        # 全体再構成: 構成を維持したまま本文を再生成してパイプラインを再通過
-        logger.info(f"スコア低（{overall}）→ 本文を再生成")
+        _cb(7, total_steps, f"スコア{overall:.1f}→再生成中…" if output_lang == "ja" else f"Score {overall:.1f}→ Rewriting…")
         if length_type == "long":
             body = _write_long_novel(plan, structure, char_count, genre, style_hint, x_safe, horror_level)
         else:
-            body = _write_body_from_plan(plan, structure, char_count, genre, style_hint, x_safe, horror_level)
+            body = _write_body_from_plan(plan, structure, char_count, genre,
+                                          style_hint + lang_instr, x_safe, horror_level)
         body = _final_edit_two_stage(plan, structure, body, char_count, genre)
         body = _auto_correct_and_purify(body, genre)
     elif overall < 8.0:
-        # 弱点ピンポイント修正
-        logger.info(f"スコア普通（{overall}）→ 弱点修正: {score.get('main_weakness','')}")
         weakness = score.get("main_weakness", "")
         if weakness:
+            _cb(7, total_steps, "弱点を修正中…" if output_lang == "ja" else "Fixing weakness…")
+            lang_tail = "\nOutput in English only." if output_lang == "en" else ""
             fix_prompt = f"""以下の小説の弱点を1点だけ修正せよ。
 
 【弱点】{weakness}
@@ -1341,18 +1350,25 @@ def generate_novel(genre: str, idea: str, char_count: int = 3000,
 {body}
 
 修正原則：核心（ending_twist・core_hook）は変えない。弱点箇所のみ集中修正。
-完成本文のみ出力。"""
+完成本文のみ出力。{lang_tail}"""
             body = _call_claude(fix_prompt, max_tokens=min(8000, char_count * 2))
 
-    # ラスト専門エージェント（ending_strength < 7.5 の場合）
+    _cb(8, total_steps, "ラストを強化中…" if output_lang == "ja" else "Strengthening ending…")
     if score.get("ending_strength", 10) < 7.5:
-        logger.info("ラスト専門エージェント起動")
         body = _strengthen_ending(plan, body, genre)
 
-    # 冒頭専門エージェント（全スコア低め or readability低い場合）
+    _cb(9, total_steps, "冒頭を磨いています…" if output_lang == "ja" else "Polishing opening…")
     if overall < 8.0 or score.get("readability", 10) < 7.0:
-        logger.info("冒頭専門エージェント起動")
         body = _strengthen_opening(plan, body, genre)
+
+    # 英語出力: 最終パスで英語に変換（日本語プロンプトで書いた場合も対応）
+    if output_lang == "en" and any(ord(c) > 0x3000 for c in body[:100]):
+        translate_prompt = f"""Translate the following Japanese horror story to English.
+Keep the horror atmosphere, character names can be transliterated.
+Output only the translated story, no explanation.
+
+{body}"""
+        body = _call_claude(translate_prompt, max_tokens=min(8000, char_count * 3))
 
     title = plan.get("title", "")
     logger.info(f"generate_novel 完了: title={title}, body={len(body)}字, score={overall}")
@@ -1407,7 +1423,8 @@ ARTICLE_WRITER_RULES = """
 
 def generate_article(genre: str, idea: str, article_type: str, char_count: int = 3000,
                      include_story: bool = False, x_safe: bool = False,
-                     horror_level: int = 3, style_hint: str = "") -> tuple[str, str, list]:
+                     horror_level: int = 3, style_hint: str = "",
+                     output_lang: str = "ja") -> tuple[str, str, list]:
     """記事本文・タイトル・タイトル候補3案をtupleで返す。"""
     genre_desc     = GENRE_DESCRIPTIONS.get(genre, genre)
     max_tokens     = min(8000, char_count * 2)
@@ -1460,6 +1477,8 @@ def generate_article(genre: str, idea: str, article_type: str, char_count: int =
 【本文】
 （ここに記事本文を書く）"""
 
+    if output_lang == "en":
+        prompt += "\n\nIMPORTANT: Write the entire article in English only."
     raw = _call_claude(prompt, max_tokens=max_tokens)
     body, title, candidates = _parse_article_with_candidates(raw)
     body = _consistency_check(body, research_memo, content_type=article_type)
@@ -2191,7 +2210,7 @@ def _get_genre_extra_rules(genre: str) -> str:
 # ── A) SNS 1ショット生成（GPT-4o） ──────────────────────────────────
 
 def generate_sns_one_shot(genre: str, style: str, elements: str,
-                           x_safe: bool = False) -> str:
+                           x_safe: bool = False, output_lang: str = "ja") -> str:
     """
     GPT-4o による 280 字以内 SNS 投稿の高速 1 ショット生成。
 
@@ -2239,6 +2258,8 @@ def generate_sns_one_shot(genre: str, style: str, elements: str,
 
 出力形式：以下の JSON のみ。説明文・マークダウン・コードブロック不要。
 {{"post_text": "（投稿文 200〜260 字）"}}"""
+    if output_lang == "en":
+        prompt += "\n\nIMPORTANT: Write post_text in English only (150-220 chars)."
 
     response = client.chat.completions.create(
         model="gpt-4o",

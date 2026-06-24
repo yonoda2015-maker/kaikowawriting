@@ -376,6 +376,63 @@ if not api_key_set():
 st.markdown("---")
 
 
+# ── かわいいキャラクター編集進捗表示 ─────────────────────────────
+_EDITOR_FRAMES = [
+    "🐱✏️", "🐱📝", "🐱🔍", "🐱💡", "🐱📖", "🐱✨", "🐱🎯", "🐱💫", "🐱🌟",
+]
+_EDITOR_CHARS = ["📝✍️", "🔍🧐", "💡✨", "🎯💫", "🌟🎉"]
+
+def _make_editor_html(step: int, total: int, label: str, lang: str = "ja") -> str:
+    """かわいい編集キャラクターの進捗HTMLを生成する。"""
+    pct = int(step / total * 100)
+    frame = _EDITOR_FRAMES[step % len(_EDITOR_FRAMES)]
+    idle = "🐱" if step < total else "🎉"
+    # 進捗バーの色
+    color = "#ff6b6b" if pct < 40 else "#ffd93d" if pct < 75 else "#6bcb77"
+    title_ja = "✏️ ねこ編集長が確認中..."
+    title_en = "✏️ Editor Neko is checking..."
+    title = title_en if lang == "en" else title_ja
+    return f"""
+<div style="background:#1a1a2e;border:1px solid #333;border-radius:12px;padding:16px;margin:8px 0;font-family:monospace">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+    <span style="font-size:2.2rem;animation:none">{frame}</span>
+    <div>
+      <div style="color:#eee;font-weight:bold;font-size:0.95rem">{title}</div>
+      <div style="color:#aaa;font-size:0.82rem;margin-top:2px">{label}</div>
+    </div>
+    <span style="margin-left:auto;color:{color};font-weight:bold;font-size:1.1rem">{pct}%</span>
+  </div>
+  <div style="background:#333;border-radius:6px;height:8px;overflow:hidden">
+    <div style="background:linear-gradient(90deg,{color},{color}aa);height:100%;width:{pct}%;transition:width 0.3s ease;border-radius:6px"></div>
+  </div>
+  <div style="color:#666;font-size:0.75rem;margin-top:6px">Step {step}/{total}</div>
+</div>"""
+
+
+def run_novel_with_progress(genre, idea, chars, x_safe, style_hint, horror_level, lang):
+    """かわいい進捗UIつきで小説を生成する。"""
+    progress_slot = st.empty()
+
+    def cb(step, total, label):
+        progress_slot.markdown(
+            _make_editor_html(step, total, label, lang),
+            unsafe_allow_html=True,
+        )
+
+    result = generate_novel(
+        genre, idea, chars,
+        x_safe=x_safe, style_hint=style_hint, horror_level=horror_level,
+        output_lang=lang, progress_cb=cb,
+    )
+    # 完了表示
+    done_label = "完成しました！" if lang == "ja" else "Done! ✨"
+    progress_slot.markdown(
+        _make_editor_html(9, 9, done_label, lang),
+        unsafe_allow_html=True,
+    )
+    return result
+
+
 # ── メインタブ ────────────────────────────────────
 tab_post, tab_novel, tab_article, tab_haunted, tab_ideas, tab_queue, tab_history, tab_analysis, tab_batch = st.tabs([
     "📱 投稿をつくる",
@@ -568,6 +625,11 @@ with tab_post:
                 st.caption(f"「{sel_profile}」の演出技法を参考に生成します")
 
         st.markdown("### STEP 4　生成する")
+        lang_post = st.radio("🌐 出力言語 / Output Language",
+                             ["🇯🇵 日本語", "🇺🇸 English"],
+                             key="post_lang", horizontal=True)
+        output_lang_post = "en" if "English" in lang_post else "ja"
+
         one_shot_mode = st.toggle(
             "⚡ 高速1ショットモード（GPT-4o）",
             value=False, key="post_one_shot_mode",
@@ -593,7 +655,7 @@ with tab_post:
                 with st.spinner("AIが文章を考えています...（10〜20秒）"):
                     try:
                         if one_shot_mode:
-                            content = generate_sns_one_shot(genre, style, idea_text, get_x_safe())
+                            content = generate_sns_one_shot(genre, style, idea_text, get_x_safe(), output_lang=output_lang_post)
                             st.session_state.update({
                                 "post_content": content, "post_pending": content,
                                 "post_score": calc_quality_score(content), "ab_content_a": None,
@@ -838,6 +900,16 @@ with tab_novel:
             st.info("💡 意味がわかると怖いジャンル：表面上は普通の話として書き、意味がわかった瞬間に怖くなる構造にします。")
 
         st.markdown("---")
+        # 言語設定
+        lang_cols_n = st.columns([1, 1])
+        with lang_cols_n[0]:
+            lang_n = st.radio("🌐 出力言語 / Output Language",
+                              ["🇯🇵 日本語", "🇺🇸 English"],
+                              key="novel_lang", horizontal=True)
+        output_lang_n = "en" if "English" in lang_n else "ja"
+        if output_lang_n == "en":
+            st.caption("🇺🇸 English mode: The story will be written in English.")
+
         tips_mode_n = st.toggle("💰 TIPSモード（アフィリエイト50%最適化）", False, key="novel_tips_mode",
                                 help="ch1-2を無料公開・ch3-4を有料に分割し、50%報酬アフィリエイト用コピペキットを自動生成します")
 
@@ -886,9 +958,10 @@ with tab_novel:
                 elif not idea_text_n.strip():
                     st.error("⚠️ ネタを入力してください")
                 else:
-                    with st.spinner(f"小説を書いています...（{novel_chars_input:,}字・数分かかります）"):
+                    spin_msg = f"小説を書いています...（約{novel_chars_input:,}字）" if output_lang_n == "ja" else f"Writing story (~{novel_chars_input:,} chars)..."
+                    with st.spinner(spin_msg):
                         try:
-                            cn, title_n = generate_novel(genre_n, idea_text_n, novel_chars_input, x_safe=get_x_safe(), style_hint=style_hint_n, horror_level=horror_level_n)
+                            cn, title_n = run_novel_with_progress(genre_n, idea_text_n, novel_chars_input, get_x_safe(), style_hint_n, horror_level_n, output_lang_n)
                             if st.session_state.get("novel_note_url") or st.session_state.get("novel_aff_url"):
                                 cn = add_monetization(cn, "novel", st.session_state.get("novel_aff_url", ""), st.session_state.get("novel_note_url", ""))
                             st.session_state.update({"novel_content": cn, "novel_pending": cn,
@@ -1064,6 +1137,13 @@ with tab_article:
                 style_hint_a = build_style_prompt(db.get_all_style_profiles()[sel_prof_a])
 
         st.markdown("---")
+        lang_n_a = st.radio("🌐 出力言語 / Output Language",
+                            ["🇯🇵 日本語", "🇺🇸 English"],
+                            key="article_lang", horizontal=True)
+        output_lang_a = "en" if "English" in lang_n_a else "ja"
+        if output_lang_a == "en":
+            st.caption("🇺🇸 English mode: The article will be written in English.")
+
         tips_mode_a = st.toggle("💰 TIPSモード（アフィリエイト50%最適化）", False, key="article_tips_mode",
                                 help="ch1-2を無料公開・ch3-4を有料に分割し、50%報酬アフィリエイト用コピペキットを自動生成します")
 
@@ -1113,7 +1193,7 @@ with tab_article:
                 else:
                     with st.spinner(f"記事を書いています...（{article_chars_input:,}字・数分かかります）"):
                         try:
-                            ca, title_a, title_cands_a = generate_article(genre_a, idea_text_a, article_type, article_chars_input, include_story, x_safe=get_x_safe(), horror_level=horror_level_a, style_hint=style_hint_a)
+                            ca, title_a, title_cands_a = generate_article(genre_a, idea_text_a, article_type, article_chars_input, include_story, x_safe=get_x_safe(), horror_level=horror_level_a, style_hint=style_hint_a, output_lang=output_lang_a)
                             if st.session_state.get("article_note_url") or st.session_state.get("article_aff_url"):
                                 ca = add_monetization(ca, "article", st.session_state.get("article_aff_url", ""), st.session_state.get("article_note_url", ""))
                             st.session_state.update({"article_content": ca, "article_pending": ca,
