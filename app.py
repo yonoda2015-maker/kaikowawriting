@@ -376,60 +376,176 @@ if not api_key_set():
 st.markdown("---")
 
 
-# ── かわいいキャラクター編集進捗表示 ─────────────────────────────
-_EDITOR_FRAMES = [
-    "🐱✏️", "🐱📝", "🐱🔍", "🐱💡", "🐱📖", "🐱✨", "🐱🎯", "🐱💫", "🐱🌟",
-]
-_EDITOR_CHARS = ["📝✍️", "🔍🧐", "💡✨", "🎯💫", "🌟🎉"]
+# ── ドットキャラ編集進捗表示 ─────────────────────────────
+import streamlit.components.v1 as _components
 
 def _make_editor_html(step: int, total: int, label: str, lang: str = "ja") -> str:
-    """かわいい編集キャラクターの進捗HTMLを生成する。"""
+    """ドットキャラ（ねこ編集長）がキャンバス上を歩き回る進捗HTML。"""
     pct = int(step / total * 100)
-    frame = _EDITOR_FRAMES[step % len(_EDITOR_FRAMES)]
-    idle = "🐱" if step < total else "🎉"
-    # 進捗バーの色
-    color = "#ff6b6b" if pct < 40 else "#ffd93d" if pct < 75 else "#6bcb77"
-    title_ja = "✏️ ねこ編集長が確認中..."
-    title_en = "✏️ Editor Neko is checking..."
-    title = title_en if lang == "en" else title_ja
-    return f"""
-<div style="background:#1a1a2e;border:1px solid #333;border-radius:12px;padding:16px;margin:8px 0;font-family:monospace">
-  <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
-    <span style="font-size:2.2rem;animation:none">{frame}</span>
-    <div>
-      <div style="color:#eee;font-weight:bold;font-size:0.95rem">{title}</div>
-      <div style="color:#aaa;font-size:0.82rem;margin-top:2px">{label}</div>
-    </div>
-    <span style="margin-left:auto;color:{color};font-weight:bold;font-size:1.1rem">{pct}%</span>
-  </div>
-  <div style="background:#333;border-radius:6px;height:8px;overflow:hidden">
-    <div style="background:linear-gradient(90deg,{color},{color}aa);height:100%;width:{pct}%;transition:width 0.3s ease;border-radius:6px"></div>
-  </div>
-  <div style="color:#666;font-size:0.75rem;margin-top:6px">Step {step}/{total}</div>
-</div>"""
+    bar_color = "#ff6b6b" if pct < 40 else "#ffd93d" if pct < 75 else "#6bcb77"
+    title = "Editor Neko is working..." if lang == "en" else "ねこ編集長が作業中..."
+    done_js = "true" if step >= total else "false"
+    step_text = f"{label} &nbsp;·&nbsp; Step {step}/{total}"
+
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+*{{margin:0;padding:0;box-sizing:border-box;}}
+body{{background:#0a0a18;font-family:'Courier New',monospace;overflow:hidden;}}
+#wrap{{width:100%;height:170px;position:relative;background:linear-gradient(180deg,#0a0a18 0%,#10102a 100%);border:1px solid #2a2a4a;border-radius:10px;overflow:hidden;}}
+.star{{position:absolute;width:2px;height:2px;background:#fff;border-radius:50%;opacity:0.5;animation:tw 3s infinite alternate;}}
+@keyframes tw{{0%{{opacity:0.15}}100%{{opacity:0.75}}}}
+#floor{{position:absolute;bottom:0;left:0;right:0;height:24px;background:linear-gradient(0deg,#12123a 0%,#1a1a44 100%);border-top:2px solid #3a3a7a;}}
+#floor::before{{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:repeating-linear-gradient(90deg,#5a5aaa 0,#5a5aaa 4px,transparent 4px,transparent 12px);opacity:0.25;}}
+#bubble{{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:#14143a;border:1px solid #6060cc;border-radius:8px;padding:4px 14px;color:#aaaaee;font-size:11px;white-space:nowrap;}}
+#bubble::after{{content:'';position:absolute;bottom:-7px;left:50%;transform:translateX(-50%);border:4px solid transparent;border-top-color:#6060cc;}}
+#sl{{position:absolute;top:34px;left:50%;transform:translateX(-50%);color:#5555aa;font-size:10px;white-space:nowrap;}}
+#pt{{position:absolute;bottom:4px;left:14px;right:14px;height:5px;background:#1e1e44;border-radius:3px;overflow:hidden;}}
+#pf{{height:100%;width:{pct}%;background:{bar_color};border-radius:3px;}}
+#pl{{position:absolute;bottom:11px;right:14px;color:{bar_color};font-size:10px;font-weight:bold;}}
+canvas{{position:absolute;bottom:24px;image-rendering:pixelated;image-rendering:crisp-edges;}}
+</style></head>
+<body>
+<div id="wrap">
+  <div class="star" style="top:12%;left:4%;animation-delay:0s"></div>
+  <div class="star" style="top:28%;left:18%;animation-delay:0.8s"></div>
+  <div class="star" style="top:8%;left:40%;animation-delay:1.5s"></div>
+  <div class="star" style="top:20%;left:62%;animation-delay:0.3s"></div>
+  <div class="star" style="top:30%;left:82%;animation-delay:1.1s"></div>
+  <div class="star" style="top:14%;left:93%;animation-delay:0.6s"></div>
+  <div id="bubble">{title}</div>
+  <div id="sl">{step_text}</div>
+  <canvas id="cat"></canvas>
+  <div id="floor"></div>
+  <div id="pt"><div id="pf"></div></div>
+  <div id="pl">{pct}%</div>
+</div>
+<script>
+const SCALE=3,PW=14,PH=18;
+const cv=document.getElementById('cat'),ctx=cv.getContext('2d');
+cv.width=PW*SCALE;cv.height=PH*SCALE;
+cv.style.width=(PW*SCALE)+'px';cv.style.height=(PH*SCALE)+'px';
+const C={{_:null,O:'#e8834a',o:'#c05c28',W:'#f8e8d8',E:'#1a1a1a',N:'#e87c8a',p:'#f5a0b0',T:'#d06830'}};
+const FA=[
+  '__OO___OO_____',
+  '_OOOO_OOOO____',
+  '_OOpOOOpO_____',
+  '_OOOOOOOOO____',
+  'OOpOONOOpO____',
+  '_OOOOOOOO_____',
+  '_OWWOOOWWO____',
+  '___OOOOOOO____',
+  '___OOOOOOOTTT_',
+  '___OOOOOOOTTT_',
+  '___WWWWWWW____',
+  '___OOOOOOO____',
+  '___OO___OO____',
+  '___OO___OO____',
+  '__oOO___OOo___',
+  '__o_______o___',
+  '______________',
+  '______________',
+];
+const FB=[
+  '__OO___OO_____',
+  '_OOOO_OOOO____',
+  '_OOpOOOpO_____',
+  '_OOOOOOOOO____',
+  'OOpOONOOpO____',
+  '_OOOOOOOO_____',
+  '_OWWOOOWWO____',
+  '___OOOOOOO____',
+  '___OOOOOOO____',
+  '___OOOOOOOTTT_',
+  '___WWWWWWWTTT_',
+  '___OOOOOOO____',
+  '___OO___OO____',
+  '___OO___OO____',
+  '__OOo___oOO___',
+  '_o__________o_',
+  '______________',
+  '______________',
+];
+const FD=[
+  '__OO___OO_____',
+  '_OOOO_OOOO____',
+  '_OOpOOOpO_____',
+  '_OOOOOOOOO____',
+  'OOpOONOOpO____',
+  '_OOOOOOOO_____',
+  '_OWWOOOWWO____',
+  '_OOOOOOOOO____',
+  'OO_OOOOOOO_OO_',
+  'O___OOOOOOO__O',
+  '____WWWWWWW___',
+  '____OOOOOOO___',
+  '____OO___OO___',
+  '___oOO___OOo__',
+  '____OO___OO___',
+  '______________',
+  '______________',
+  '______________',
+];
+function draw(grid,flip){{
+  ctx.clearRect(0,0,cv.width,cv.height);
+  if(flip){{ctx.save();ctx.scale(-1,1);ctx.translate(-cv.width,0);}}
+  for(let r=0;r<grid.length;r++)for(let c=0;c<grid[r].length;c++){{
+    const ch=grid[r][c];if(ch==='_')continue;
+    ctx.fillStyle=C[ch]||'#e8834a';
+    ctx.fillRect(c*SCALE,r*SCALE,SCALE,SCALE);
+  }}
+  if(flip)ctx.restore();
+}}
+const wrap=document.getElementById('wrap');
+let x=30,dir=1,tick=0;
+const isDone={done_js};
+function loop(){{
+  tick++;
+  const W=wrap.offsetWidth||600,catW=PW*SCALE;
+  if(isDone){{
+    const b=Math.abs(Math.sin(tick*0.12))*8;
+    cv.style.bottom=(24+b)+'px';
+    cv.style.left=((W-catW)/2)+'px';
+    draw(FD,false);
+  }}else{{
+    x+=dir*1.3;
+    const mx=W-catW-20;
+    if(x>=mx){{x=mx;dir=-1;}}
+    if(x<=20){{x=20;dir=1;}}
+    cv.style.left=x+'px';cv.style.bottom='24px';
+    draw(Math.floor(tick/9)%2===0?FA:FB,dir===-1);
+  }}
+  requestAnimationFrame(loop);
+}}
+loop();
+</script>
+</body></html>"""
 
 
 def run_novel_with_progress(genre, idea, chars, x_safe, style_hint, horror_level, lang):
-    """かわいい進捗UIつきで小説を生成する。"""
+    """ドットキャラ進捗UIつきで小説を生成する。"""
     progress_slot = st.empty()
 
     def cb(step, total, label):
-        progress_slot.markdown(
-            _make_editor_html(step, total, label, lang),
-            unsafe_allow_html=True,
-        )
+        with progress_slot:
+            _components.html(
+                _make_editor_html(step, total, label, lang),
+                height=178,
+                scrolling=False,
+            )
 
     result = generate_novel(
         genre, idea, chars,
         x_safe=x_safe, style_hint=style_hint, horror_level=horror_level,
         output_lang=lang, progress_cb=cb,
     )
-    # 完了表示
-    done_label = "完成しました！" if lang == "ja" else "Done! ✨"
-    progress_slot.markdown(
-        _make_editor_html(9, 9, done_label, lang),
-        unsafe_allow_html=True,
-    )
+    done_label = "完成しました！" if lang == "ja" else "Done!"
+    with progress_slot:
+        _components.html(
+            _make_editor_html(9, 9, done_label, lang),
+            height=178,
+            scrolling=False,
+        )
     return result
 
 
