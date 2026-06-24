@@ -380,50 +380,36 @@ st.markdown("---")
 import streamlit.components.v1 as _components
 
 def _make_editor_html(step: int, total: int, label: str, lang: str = "ja") -> str:
-    """かわいいSVGねこ編集長が歩き回る進捗HTML。"""
+    """純CSS animationのかわいいねこ編集長進捗HTML（st.markdown用）。"""
     pct = int(step / total * 100)
     bar_color = "#ff6b6b" if pct < 40 else "#ffd93d" if pct < 75 else "#6bcb77"
     title = "Editor Neko is working..." if lang == "en" else "ねこ編集長が作業中..."
     done_title = "Done! Meow!" if lang == "en" else "完成ニャ！✨"
-    done_js = "true" if step >= total else "false"
+    is_done = step >= total
+    bub_text = done_title if is_done else title
     step_text = f"{label} &nbsp;·&nbsp; Step {step}/{total}"
+    walk_anim = "none" if is_done else "walk 5s linear infinite"
+    bounce_anim = "bounce 0.6s ease-in-out infinite alternate" if is_done else "none"
+    walk_left = "calc(50% - 30px)" if is_done else "20px"
 
-    return f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8">
-<style>
-*{{margin:0;padding:0;box-sizing:border-box;}}
-body{{background:#0a0a18;overflow:hidden;}}
-#wrap{{width:100%;height:190px;background:#0a0a18;border:2px solid #3030a0;border-radius:14px;overflow:hidden;position:relative;}}
-.star{{position:absolute;border-radius:50%;background:#fff;animation:tw 2.5s ease-in-out infinite alternate;}}
-@keyframes tw{{from{{opacity:.08}}to{{opacity:.7}}}}
-#ground{{position:absolute;bottom:0;left:0;right:0;height:30px;background:#181858;border-top:2px solid #4040c0;}}
-#bubble{{position:absolute;top:10px;left:50%;transform:translateX(-50%);background:#fff;border:2px solid #e090c0;border-radius:20px;padding:5px 18px;font:bold 12px sans-serif;color:#c050a0;white-space:nowrap;}}
-#bubble::after{{content:'';position:absolute;bottom:-10px;left:50%;transform:translateX(-50%);border:6px solid transparent;border-top-color:#e090c0;}}
-#step-lbl{{position:absolute;top:42px;left:50%;transform:translateX(-50%);font:11px 'Courier New',monospace;color:#8080cc;white-space:nowrap;}}
-#bar-bg{{position:absolute;bottom:6px;left:16px;right:16px;height:8px;background:#0c0c38;border-radius:8px;overflow:hidden;}}
-#bar-fg{{height:100%;width:{pct}%;background:{bar_color};border-radius:8px;}}
-#bar-pct{{position:absolute;bottom:16px;right:16px;font:bold 11px 'Courier New',monospace;color:{bar_color};}}
-#cat-wrap{{position:absolute;bottom:30px;}}
-</style></head>
-<body>
-<div id="wrap">
-  <div class="star" style="width:2px;height:2px;top:9%;left:6%;animation-delay:0s"></div>
-  <div class="star" style="width:3px;height:3px;top:20%;left:20%;animation-delay:.8s"></div>
-  <div class="star" style="width:2px;height:2px;top:7%;left:45%;animation-delay:1.5s"></div>
-  <div class="star" style="width:2px;height:2px;top:25%;left:68%;animation-delay:.4s"></div>
-  <div class="star" style="width:3px;height:3px;top:15%;left:88%;animation-delay:1.1s"></div>
-  <div id="bubble">{title}</div>
-  <div id="step-lbl">{step_text}</div>
-  <div id="cat-wrap">
-    <svg id="cat" xmlns="http://www.w3.org/2000/svg" width="60" height="80" viewBox="0 0 60 80">
-      <path id="tail" d="M30 68 Q18 72 16 62 Q14 54 22 54" stroke="#e07030" stroke-width="5" fill="none" stroke-linecap="round"/>
+    return f"""<div style="width:100%;height:190px;background:#0a0a18;border:2px solid #3030a0;border-radius:14px;overflow:hidden;position:relative;font-family:sans-serif;">
+  <div style="position:absolute;width:2px;height:2px;top:9%;left:6%;background:#fff;border-radius:50%;animation:tw 2.5s ease-in-out infinite alternate;"></div>
+  <div style="position:absolute;width:3px;height:3px;top:20%;left:20%;background:#fff;border-radius:50%;animation:tw 2.5s ease-in-out .8s infinite alternate;"></div>
+  <div style="position:absolute;width:2px;height:2px;top:7%;left:45%;background:#fff;border-radius:50%;animation:tw 2.5s ease-in-out 1.5s infinite alternate;"></div>
+  <div style="position:absolute;width:2px;height:2px;top:25%;left:68%;background:#fff;border-radius:50%;animation:tw 2.5s ease-in-out .4s infinite alternate;"></div>
+  <div style="position:absolute;width:3px;height:3px;top:15%;left:88%;background:#fff;border-radius:50%;animation:tw 2.5s ease-in-out 1.1s infinite alternate;"></div>
+  <div style="position:absolute;top:10px;left:50%;transform:translateX(-50%);background:#fff;border:2px solid #e090c0;border-radius:20px;padding:5px 18px;font:bold 12px sans-serif;color:#c050a0;white-space:nowrap;">{bub_text}
+    <span style="position:absolute;bottom:-10px;left:50%;transform:translateX(-50%);width:0;height:0;border:6px solid transparent;border-top-color:#e090c0;"></span>
+  </div>
+  <div style="position:absolute;top:42px;left:50%;transform:translateX(-50%);font:11px 'Courier New',monospace;color:#8080cc;white-space:nowrap;">{step_text}</div>
+  <div style="position:absolute;bottom:30px;left:{walk_left};animation:{walk_anim},{bounce_anim};">
+    <svg xmlns="http://www.w3.org/2000/svg" width="60" height="80" viewBox="0 0 60 80" style="display:block;">
+      <path d="M30 68 Q18 72 16 62 Q14 54 22 54" stroke="#e07030" stroke-width="5" fill="none" stroke-linecap="round" style="animation:tailSway 0.8s ease-in-out infinite alternate;transform-origin:30px 68px;"/>
       <ellipse cx="30" cy="62" rx="16" ry="12" fill="#f08030"/>
       <ellipse cx="30" cy="60" rx="10" ry="8" fill="#fff0e0"/>
-      <ellipse id="leg-ll" cx="20" cy="73" rx="5" ry="4" fill="#e07030"/>
-      <ellipse id="leg-lr" cx="40" cy="73" rx="5" ry="4" fill="#e07030"/>
-      <g id="paw-l"><ellipse cx="18" cy="76" rx="4" ry="2.5" fill="#f09050"/></g>
-      <g id="paw-r"><ellipse cx="42" cy="76" rx="4" ry="2.5" fill="#f09050"/></g>
-      <g id="head-g">
+      <ellipse cx="20" cy="73" rx="5" ry="4" fill="#e07030" style="animation:pawSwing 0.5s ease-in-out infinite alternate;transform-origin:20px 73px;"/>
+      <ellipse cx="40" cy="73" rx="5" ry="4" fill="#e07030" style="animation:pawSwing 0.5s ease-in-out .25s infinite alternate;transform-origin:40px 73px;"/>
+      <g style="animation:headBob 0.6s ease-in-out infinite alternate;transform-origin:30px 34px;">
         <ellipse cx="30" cy="34" rx="20" ry="18" fill="#f08030"/>
         <path d="M12 22 L8 10 L20 20 Z" fill="#f08030" stroke="#e07030" stroke-width="1"/>
         <path d="M48 22 L52 10 L40 20 Z" fill="#f08030" stroke="#e07030" stroke-width="1"/>
@@ -431,8 +417,8 @@ body{{background:#0a0a18;overflow:hidden;}}
         <ellipse cx="45" cy="18" rx="5" ry="7" fill="#f8c0c0"/>
         <ellipse cx="22" cy="32" rx="8" ry="9" fill="white"/>
         <ellipse cx="38" cy="32" rx="8" ry="9" fill="white"/>
-        <ellipse id="eye-l" cx="22" cy="34" rx="5.5" ry="6" fill="#3040c0"/>
-        <ellipse id="eye-r" cx="38" cy="34" rx="5.5" ry="6" fill="#3040c0"/>
+        <ellipse cx="22" cy="34" rx="5.5" ry="6" fill="#3040c0"/>
+        <ellipse cx="38" cy="34" rx="5.5" ry="6" fill="#3040c0"/>
         <ellipse cx="22" cy="33" rx="3.5" ry="4.5" fill="#111"/>
         <ellipse cx="38" cy="33" rx="3.5" ry="4.5" fill="#111"/>
         <ellipse cx="21" cy="31" rx="1.5" ry="1.5" fill="white"/>
@@ -446,77 +432,39 @@ body{{background:#0a0a18;overflow:hidden;}}
         <ellipse cx="19" cy="36" rx="5" ry="3" fill="#f090b0" opacity=".5"/>
         <ellipse cx="41" cy="36" rx="5" ry="3" fill="#f090b0" opacity=".5"/>
       </g>
-      <g id="pencil-g">
+      <g style="animation:pencilWiggle 0.4s ease-in-out infinite alternate;transform-origin:48px 38px;">
         <rect x="44" y="28" width="5" height="20" rx="2" fill="#f8d040" transform="rotate(30,46,38)"/>
         <polygon points="0,-4 4,4 -4,4" fill="#e07030" transform="translate(52,44) rotate(30)"/>
         <polygon points="0,-2 2,0 -2,0" fill="#ffd0a0" transform="translate(52,44) rotate(30)"/>
       </g>
     </svg>
   </div>
-  <div id="ground"></div>
-  <div id="bar-bg"><div id="bar-fg"></div></div>
-  <div id="bar-pct">{pct}%</div>
-</div>
-<script>
-const wrap=document.getElementById('wrap');
-const catWrap=document.getElementById('cat-wrap');
-const bubEl=document.getElementById('bubble');
-const eyeL=document.getElementById('eye-l');
-const eyeR=document.getElementById('eye-r');
-const pencilG=document.getElementById('pencil-g');
-const tailPath=document.getElementById('tail');
-const pawL=document.getElementById('paw-l');
-const pawR=document.getElementById('paw-r');
-let catX=40,dir=1,tick=0;
-const isDone={done_js};
-if(isDone){{bubEl.textContent='{done_title}';bubEl.style.color='#e040a0';}}
-function loop(){{
-  tick++;
-  const W=wrap.offsetWidth||600,catW=60;
-  if(isDone){{
-    const bx=Math.sin(tick*.05)*20;
-    catWrap.style.bottom=(30+Math.abs(Math.sin(tick*.1)*6))+'px';
-    catWrap.style.left=((W-catW)/2+bx)+'px';
-    eyeL.setAttribute('ry',Math.abs(Math.sin(tick*.08))<.1?1:6);
-    eyeR.setAttribute('ry',Math.abs(Math.sin(tick*.08))<.1?1:6);
-    pencilG.setAttribute('transform','rotate('+(Math.sin(tick*.15)*20)+',48,38)');
-  }}else{{
-    catX+=dir*1.6;
-    if(catX>=W-catW-20){{catX=W-catW-20;dir=-1;}}
-    if(catX<=20){{catX=20;dir=1;}}
-    catWrap.style.left=catX+'px';
-    catWrap.style.bottom='30px';
-    const headBob=Math.sin(tick*.18)*2;
-    document.getElementById('head-g').setAttribute('transform','translate(0,'+headBob+')');
-    if(Math.floor(tick/12)%2===0){{
-      pawL.setAttribute('transform','translate(0,3) rotate(-15,18,76)');
-      pawR.setAttribute('transform','');
-    }}else{{
-      pawL.setAttribute('transform','');
-      pawR.setAttribute('transform','translate(0,3) rotate(15,42,76)');
-    }}
-    document.getElementById('cat').setAttribute('transform',dir===-1?'scale(-1,1) translate(-60,0)':'');
-    const ts=Math.sin(tick*.12)*12;
-    tailPath.setAttribute('d','M30 68 Q'+(18+ts)+' 72 '+(16+ts*.5)+' 62 Q14 54 22 54');
-    pencilG.setAttribute('transform','rotate('+(Math.sin(tick*.22)*10-5)+',48,38)');
-  }}
-  requestAnimationFrame(loop);
-}}
-loop();
-</script></body></html>"""
+  <div style="position:absolute;bottom:0;left:0;right:0;height:30px;background:#181858;border-top:2px solid #4040c0;"></div>
+  <div style="position:absolute;bottom:6px;left:16px;right:16px;height:8px;background:#0c0c38;border-radius:8px;overflow:hidden;">
+    <div style="height:100%;width:{pct}%;background:{bar_color};border-radius:8px;"></div>
+  </div>
+  <div style="position:absolute;bottom:16px;right:16px;font:bold 11px 'Courier New',monospace;color:{bar_color};">{pct}%</div>
+  <style>
+    @keyframes tw{{from{{opacity:.08}}to{{opacity:.7}}}}
+    @keyframes walk{{0%{{left:20px}}50%{{left:calc(100% - 80px)}}100%{{left:20px}}}}
+    @keyframes bounce{{from{{bottom:30px}}to{{bottom:46px}}}}
+    @keyframes headBob{{from{{transform:translateY(0)}}to{{transform:translateY(-2px)}}}}
+    @keyframes pawSwing{{from{{transform:rotate(-15deg)}}to{{transform:rotate(15deg)}}}}
+    @keyframes tailSway{{from{{transform:rotate(-12deg)}}to{{transform:rotate(12deg)}}}}
+    @keyframes pencilWiggle{{from{{transform:rotate(-8deg)}}to{{transform:rotate(8deg)}}}}
+  </style>
+</div>"""
 
 
 def run_novel_with_progress(genre, idea, chars, x_safe, style_hint, horror_level, lang):
-    """ドットキャラ進捗UIつきで小説を生成する。"""
+    """かわいいねこ編集長進捗UIつきで小説を生成する。"""
     progress_slot = st.empty()
 
     def cb(step, total, label):
-        with progress_slot:
-            _components.html(
-                _make_editor_html(step, total, label, lang),
-                height=178,
-                scrolling=False,
-            )
+        progress_slot.markdown(
+            _make_editor_html(step, total, label, lang),
+            unsafe_allow_html=True,
+        )
 
     result = generate_novel(
         genre, idea, chars,
@@ -524,12 +472,10 @@ def run_novel_with_progress(genre, idea, chars, x_safe, style_hint, horror_level
         output_lang=lang, progress_cb=cb,
     )
     done_label = "完成しました！" if lang == "ja" else "Done!"
-    with progress_slot:
-        _components.html(
-            _make_editor_html(9, 9, done_label, lang),
-            height=178,
-            scrolling=False,
-        )
+    progress_slot.markdown(
+        _make_editor_html(9, 9, done_label, lang),
+        unsafe_allow_html=True,
+    )
     return result
 
 
