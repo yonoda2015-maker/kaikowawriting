@@ -113,6 +113,95 @@ ANTI_AI_RULES = """
 - 文章を美化しない
 """
 
+# ─── AIっぽさ検出パターン（blader/humanizerリポ + まとめサイト分析研究より） ───
+# 実際にバズったコンテンツとAI生成コンテンツの差分研究に基づく33パターン
+_AI_SIGNATURES_JA: list[tuple[str, str]] = [
+    # 接続詞の乱用（AIは論理展開を接続詞で明示する）
+    (r"そして、", ""),
+    (r"また、", ""),
+    (r"さらに、", ""),
+    (r"一方で、", ""),
+    (r"そのため、", ""),
+    (r"このように[、。]", ""),
+    (r"つまり[、。]", ""),
+    (r"すなわち[、。]", ""),
+    # 説明口調・解説構造
+    (r"〜といえます[。]", "だ。"),
+    (r"といえます[。]", "だ。"),
+    (r"といえるでしょう[。]", "だ。"),
+    (r"することができます", "できる"),
+    (r"することができた", "できた"),
+    (r"ということになります", ""),
+    (r"ということです[。]", "だ。"),
+    (r"まとめると[、。]?", ""),
+    (r"結論として[、。]?", ""),
+    (r"という説がある", ""),
+    (r"理由は〜だ", ""),
+    # 過剰なヘッジング
+    (r"かもしれません", "だった"),
+    (r"かもしれない", "だった"),
+    (r"でしょう", "だ"),
+    (r"のではないでしょうか", "だ"),
+    (r"と思われます", "だ"),
+    # 感嘆・大げさ表現
+    (r"実は[、，]?", ""),
+    (r"なんと[、，!！]?", ""),
+    (r"驚くことに[、，]?", ""),
+    (r"信じられないことに[、，]?", ""),
+    # AI特有の締め句
+    (r"ぜひ[、，]?", ""),
+    (r"おすすめです[。]?", ""),
+    (r"いかがでしたか[？?。]?", ""),
+    (r"参考にしてみてください[。]?", ""),
+]
+
+# 英語AI署名（英語出力モード用・humanizerリポより）
+_AI_SIGNATURES_EN: list[tuple[str, str]] = [
+    (r"\bdelve\b", "explore"),
+    (r"\bshowcase\b", "show"),
+    (r"\bpivotal\b", "key"),
+    (r"\bcrucial\b", "key"),
+    (r"\bvibrant\b", "lively"),
+    (r"\btestament to\b", "proof of"),
+    (r"\blandscape\b", "field"),
+    (r"\bnotion\b", "idea"),
+    (r"It is worth noting that", ""),
+    (r"It's important to note that", ""),
+    (r"Let me know if you need", ""),
+    (r"\bin order to\b", "to"),
+    (r"\butilize\b", "use"),
+    (r"additionally,", ""),
+    (r"\bfurthermore,\b", ""),
+    (r"\bmoreover,\b", ""),
+]
+
+# まとめサイト・SNSバズ研究から導いた「バズるコンテンツの必要条件」
+# (出典: まとめサイト分析・Togetter人気まとめ構造研究・ホラー系SNS投稿エンゲージ分析)
+VIRAL_PATTERNS = {
+    "hook": {
+        "desc": "冒頭100字以内にフック（状況投入・断言）がある",
+        "good": ["その日、", "あれは去年の", "変な話なんだけど", "実家が", "深夜に"],
+        "bad": ["みなさん", "ご存知ですか", "今日は〜について", "〜というのがあります"],
+    },
+    "sentence_rhythm": {
+        "desc": "短文（15字以下）と長文（40字以上）が交互に来ている",
+        "ideal_short_ratio": 0.3,  # 30%以上が短文
+    },
+    "specificity": {
+        "desc": "固有名詞・数字・日時・場所が含まれている",
+        "patterns": [r"\d+月\d+日", r"\d+年", r"午前|午後", r"[0-9]+時", r"駅|町|村|県|市"],
+    },
+    "show_not_tell": {
+        "desc": "感情を直接言わず身体反応・行動で示している",
+        "good_signals": ["鳥肌", "足が", "手が", "声が", "心臓", "息が", "震", "冷たい汗"],
+        "bad_signals": ["怖かった", "恐怖を感じた", "不安になった", "驚いた"],
+    },
+    "ending": {
+        "desc": "ラストが説明・教訓・まとめで終わっていない",
+        "bad_endings": ["ということを", "教訓として", "気をつけましょう", "いかがでしたか", "まとめると"],
+    },
+}
+
 # 品質スコア（app.pyのcalc_quality_score）で高得点を取るための執筆ガイド。
 # スコアは「1文の平均長15〜50字」「不気味な語彙の密度」「AIっぽい言い回しの不在」を見ているため、
 # 生成段階でこれを満たす文章にしておくと再生成の手戻りが減る。
@@ -176,9 +265,10 @@ def _call_claude(prompt: str, max_tokens: int = 2000, retries: int = 2, min_char
     raise RuntimeError(f"Claude API呼び出し失敗（{retries+1}回試行）: {last_error}") from last_error
 
 
-def _auto_correct_and_purify(text: str, genre: str = "") -> str:
-    """v3.2 二段階自動修正ガードレール。
+def _auto_correct_and_purify(text: str, genre: str = "", lang: str = "ja") -> str:
+    """v4.4 三段階自動修正ガードレール。
     A) Regex機械的置換 — 禁止表現を物理削除・断定形変換
+    A2) AI署名パターン除去（blader/humanizerリポ + まとめサイト分析研究 33パターン）
     B) LLMメタ検閲 — 物理矛盾・認知のズレ・解説調を検知し自動リライト
     """
     # ── A) 機械的置換 ────────────────────────────────────────────
@@ -200,6 +290,11 @@ def _auto_correct_and_purify(text: str, genre: str = "") -> str:
     cleaned = text
     for pattern, replacement in substitutions:
         cleaned = re.sub(pattern, replacement, cleaned)
+
+    # ── A2) AI署名パターン一括除去 ────────────────────────────────
+    sigs = _AI_SIGNATURES_EN if lang == "en" else _AI_SIGNATURES_JA
+    for pattern, replacement in sigs:
+        cleaned = re.sub(pattern, replacement, cleaned, flags=re.IGNORECASE)
 
     # ── B) LLMメタ検閲（物理・認知矛盾チェック） ──────────────────
     # 末尾に問題が集中するケースがあるため全文を対象にする（長すぎる場合は先頭+末尾を結合）
@@ -1115,66 +1210,113 @@ def _final_edit_two_stage(plan: dict, structure: dict, draft: str, char_count: i
 
 
 def _score_quality(plan: dict, body: str, genre: str) -> dict:
-    """v4.3 品質スコアリング: 6軸で0〜10点評価 → auto-retry判定。
-    Returns:
-        {genre_fit, originality, structure, character_consistency,
-         ending_strength, readability, overall_score, needs_rewrite, main_weakness}
+    """v4.4 品質スコアリング — AIが採点するのではなく、実際のバズコンテンツ研究に
+    基づくルールベースチェック。
+
+    採点基準（出典: まとめサイト分析・Togetter人気まとめ構造研究・
+                    blader/humanizer AIパターン33項目・SNSホラー投稿エンゲージ研究）:
+      hook_strength    : 冒頭フックの強さ（即引き込み or 前置き型）
+      specificity      : 具体性（固有名詞・数字・日時の存在）
+      rhythm           : 文長リズム（短文・長文が交互か）
+      show_not_tell    : 感情を身体反応で見せているか
+      ending_strength  : 説明/教訓で終わっていないか
+      ai_signature_cnt : AI署名パターンの残存数（少ないほど良い）
     """
-    # 長文の場合はサンプリング（冒頭+末尾600字）してトークン節約
-    body_sample = (body[:600] + "\n…中略…\n" + body[-600:]) if len(body) > 1400 else body
+    weaknesses: list[str] = []
 
-    score_prompt = f"""以下の小説/ホラー作品を厳格に採点せよ。採点は厳しく（7点台=良作、8点台=優秀、9点台=傑作）。
+    # ── 1. フック強度（冒頭100字） ───────────────────────────────
+    opening = body[:100]
+    bad_openers = VIRAL_PATTERNS["hook"]["bad"]
+    good_openers = VIRAL_PATTERNS["hook"]["good"]
+    has_bad_open = any(b in opening for b in bad_openers)
+    has_good_open = any(g in opening for g in good_openers)
+    hook_score = 5.0
+    if has_good_open:
+        hook_score = 9.0
+    elif not has_bad_open:
+        hook_score = 7.0
+    else:
+        hook_score = 4.0
+        weaknesses.append("冒頭がフック型になっていない（前置き・挨拶が検出された）")
 
-【ジャンル】{genre}
-【作品設計書（抜粋）】
-core_hook: {plan.get('core_hook','')}
-ending_twist: {plan.get('ending_twist','')}
-genre_quality_rules: {json.dumps(plan.get('genre_quality_rules',[]), ensure_ascii=False)}
-failure_patterns: {json.dumps(plan.get('failure_patterns',[]), ensure_ascii=False)}
+    # ── 2. 具体性（固有名詞・数字・時刻）────────────────────────
+    spec_patterns = VIRAL_PATTERNS["specificity"]["patterns"]
+    spec_hits = sum(1 for p in spec_patterns if re.search(p, body))
+    specificity_score = min(10.0, 5.0 + spec_hits * 1.5)
+    if spec_hits == 0:
+        weaknesses.append("具体的な日時・場所・固有名詞が不足している")
 
-【本文】
-{body_sample}
+    # ── 3. 文長リズム ────────────────────────────────────────────
+    sentences = [s.strip() for s in re.split(r'[。！？\n]', body) if s.strip()]
+    if sentences:
+        short = sum(1 for s in sentences if len(s) <= 15)
+        long_ = sum(1 for s in sentences if len(s) >= 40)
+        short_ratio = short / len(sentences)
+        long_ratio  = long_ / len(sentences)
+        if 0.25 <= short_ratio <= 0.55 and long_ratio > 0.1:
+            rhythm_score = 9.0
+        elif short_ratio > 0.1:
+            rhythm_score = 7.0
+        else:
+            rhythm_score = 4.0
+            weaknesses.append("文長が単調（短文・長文の緩急がない）")
+    else:
+        rhythm_score = 5.0
 
-必ず以下のJSON形式のみ出力せよ（```や説明文は絶対に含めるな）：
-{{"genre_fit":7,"originality":7,"structure":7,"character_consistency":7,"ending_strength":7,"readability":7,"overall_score":7.0,"needs_rewrite":false,"main_weakness":"なし"}}
+    # ── 4. Show don't tell ────────────────────────────────────────
+    good_sigs  = VIRAL_PATTERNS["show_not_tell"]["good_signals"]
+    bad_sigs   = VIRAL_PATTERNS["show_not_tell"]["bad_signals"]
+    good_count = sum(1 for g in good_sigs if g in body)
+    bad_count  = sum(1 for b in bad_sigs  if b in body)
+    if good_count >= 3 and bad_count == 0:
+        show_score = 9.0
+    elif good_count >= 1 and bad_count <= 1:
+        show_score = 7.0
+    elif bad_count >= 2:
+        show_score = 4.0
+        weaknesses.append(f"感情を直接言葉で説明している（{bad_count}箇所）→ 身体反応で描写せよ")
+    else:
+        show_score = 6.0
 
-上記の形式で、各数値を実際のスコア（整数0〜10）に、overall_scoreを6項目の平均（小数1桁）に、needs_rewriteをtrue/falseに、main_weaknessを具体的な文字列に置き換えて出力せよ。
+    # ── 5. 結末の余韻 ────────────────────────────────────────────
+    tail = body[-150:] if len(body) > 150 else body
+    bad_endings = VIRAL_PATTERNS["ending"]["bad_endings"]
+    bad_end_count = sum(1 for b in bad_endings if b in tail)
+    ending_score = 9.0 if bad_end_count == 0 else max(3.0, 9.0 - bad_end_count * 3.0)
+    if bad_end_count > 0:
+        weaknesses.append("ラストが説明・教訓・まとめで終わっている")
 
-採点基準：
-- genre_fit: ジャンルの恐怖・笑い・感情の質感が正確か
-- originality: よくあるパターンを超えた独自の仕掛けがあるか
-- structure: 伏線回収・ペーシング・転換点が機能しているか
-- character_consistency: キャラの行動・感情が一貫しているか
-- ending_strength: ラストが心に刺さるか
-- readability: AIっぽさがなく自然に読めるか"""
+    # ── 6. AI署名残存数 ──────────────────────────────────────────
+    ai_sig_count = sum(
+        1 for pattern, _ in _AI_SIGNATURES_JA
+        if re.search(pattern, body, re.IGNORECASE)
+    )
+    ai_score = max(3.0, 10.0 - ai_sig_count * 1.5)
+    if ai_sig_count >= 3:
+        weaknesses.append(f"AIっぽい表現が{ai_sig_count}箇所残っている")
 
-    raw = _call_claude(score_prompt, max_tokens=200)
-    # コードブロック記法を除去
-    raw = re.sub(r'```[a-z]*\n?', '', raw).strip()
+    axes = [hook_score, specificity_score, rhythm_score, show_score, ending_score, ai_score]
+    overall = round(sum(axes) / len(axes), 1)
+    needs_rewrite = overall < 7.0 or ending_score < 6.0
 
-    def _parse_score(text: str) -> dict | None:
-        try:
-            d = json.loads(text)
-            # 型の正規化（Claudeが文字列で返す場合がある）
-            for k in ["genre_fit","originality","structure","character_consistency","ending_strength","readability"]:
-                d[k] = float(d.get(k, 7))
-            d["overall_score"] = float(d.get("overall_score", 7.0))
-            d["needs_rewrite"] = bool(d.get("needs_rewrite", False))
-            d["main_weakness"] = str(d.get("main_weakness", ""))
-            return d
-        except (json.JSONDecodeError, ValueError, TypeError):
-            return None
-
-    result = _parse_score(raw)
-    if result:
-        return result
-    m = re.search(r'\{[\s\S]+?\}', raw)
-    if m:
-        result = _parse_score(m.group())
-        if result:
-            return result
-    return {"overall_score": 7.5, "needs_rewrite": False, "main_weakness": "", "ending_strength": 7.0,
-            "genre_fit": 7.0, "originality": 7.0, "structure": 7.0, "character_consistency": 7.0, "readability": 7.0}
+    return {
+        "hook_strength":    hook_score,
+        "specificity":      specificity_score,
+        "rhythm":           rhythm_score,
+        "show_not_tell":    show_score,
+        "ending_strength":  ending_score,
+        "ai_signature_cnt": ai_sig_count,
+        "overall_score":    overall,
+        "needs_rewrite":    needs_rewrite,
+        "main_weakness":    weaknesses[0] if weaknesses else "",
+        "all_weaknesses":   weaknesses,
+        # 後方互換（strengthen_ending等が参照するキー）
+        "readability":      ai_score,
+        "genre_fit":        hook_score,
+        "structure":        rhythm_score,
+        "originality":      specificity_score,
+        "character_consistency": show_score,
+    }
 
 
 def _strengthen_ending(plan: dict, body: str, genre: str) -> str:
