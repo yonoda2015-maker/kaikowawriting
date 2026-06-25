@@ -386,36 +386,42 @@ st.markdown("---")
 import streamlit.components.v1 as _components
 
 def _make_editor_html(step: int, total: int, label: str, lang: str = "ja") -> str:
-    """純CSS animationのかわいいねこ編集長進捗HTML（st.markdown用）。"""
+    """ブレイクダンスしながら横移動するねこ編集長進捗HTML。"""
     pct = int(step / total * 100)
     bar_color = "#ff6b6b" if pct < 40 else "#ffd93d" if pct < 75 else "#6bcb77"
-    title = "Editor Neko is working..." if lang == "en" else "ねこ編集長が作業中..."
+    title = "Editor Neko is working..." if lang == "en" else "ねこ編集長がブレイクダンス中..."
     done_title = "Done! Meow!" if lang == "en" else "完成ニャ！✨"
     is_done = step >= total
     bub_text = done_title if is_done else title
     step_text = f"{label} &nbsp;·&nbsp; Step {step}/{total}"
-    walk_anim = "none" if is_done else "walk 5s linear infinite"
-    bounce_anim = "bounce 0.6s ease-in-out infinite alternate" if is_done else "none"
-    walk_left = "calc(50% - 30px)" if is_done else "20px"
 
-    return f"""<div style="width:100%;height:190px;background:#0a0a18;border:2px solid #3030a0;border-radius:14px;overflow:hidden;position:relative;font-family:sans-serif;">
+    return f"""<div style="width:100%;height:200px;background:#0a0a18;border:2px solid #3030a0;border-radius:14px;overflow:hidden;position:relative;font-family:sans-serif;">
   <div style="position:absolute;width:2px;height:2px;top:9%;left:6%;background:#fff;border-radius:50%;animation:tw 2.5s ease-in-out infinite alternate;"></div>
   <div style="position:absolute;width:3px;height:3px;top:20%;left:20%;background:#fff;border-radius:50%;animation:tw 2.5s ease-in-out .8s infinite alternate;"></div>
   <div style="position:absolute;width:2px;height:2px;top:7%;left:45%;background:#fff;border-radius:50%;animation:tw 2.5s ease-in-out 1.5s infinite alternate;"></div>
   <div style="position:absolute;width:2px;height:2px;top:25%;left:68%;background:#fff;border-radius:50%;animation:tw 2.5s ease-in-out .4s infinite alternate;"></div>
   <div style="position:absolute;width:3px;height:3px;top:15%;left:88%;background:#fff;border-radius:50%;animation:tw 2.5s ease-in-out 1.1s infinite alternate;"></div>
-  <div style="position:absolute;top:10px;left:50%;transform:translateX(-50%);background:#fff;border:2px solid #e090c0;border-radius:20px;padding:5px 18px;font:bold 12px sans-serif;color:#c050a0;white-space:nowrap;">{bub_text}
-    <span style="position:absolute;bottom:-10px;left:50%;transform:translateX(-50%);width:0;height:0;border:6px solid transparent;border-top-color:#e090c0;"></span>
-  </div>
+  <div id="neko-bub-{pct}" style="position:absolute;top:10px;left:50%;transform:translateX(-50%);background:#fff;border:2px solid #e090c0;border-radius:20px;padding:5px 18px;font:bold 12px sans-serif;color:#c050a0;white-space:nowrap;">{bub_text}<span style="position:absolute;bottom:-10px;left:50%;transform:translateX(-50%);width:0;height:0;border:6px solid transparent;border-top-color:#e090c0;"></span></div>
   <div style="position:absolute;top:42px;left:50%;transform:translateX(-50%);font:11px 'Courier New',monospace;color:#8080cc;white-space:nowrap;">{step_text}</div>
-  <div style="position:absolute;bottom:30px;left:{walk_left};animation:{walk_anim},{bounce_anim};">
-    <svg xmlns="http://www.w3.org/2000/svg" width="60" height="80" viewBox="0 0 60 80" style="display:block;">
-      <path d="M30 68 Q18 72 16 62 Q14 54 22 54" stroke="#e07030" stroke-width="5" fill="none" stroke-linecap="round" style="animation:tailSway 0.8s ease-in-out infinite alternate;transform-origin:30px 68px;"/>
+  <div id="neko-wrap-{pct}" style="position:absolute;bottom:30px;animation:nekoWalk 4s linear infinite;">
+    <svg xmlns="http://www.w3.org/2000/svg" width="60" height="85" viewBox="0 0 60 85" style="animation:breakdance 1.6s cubic-bezier(.36,.07,.19,.97) infinite;display:block;">
+      <g style="animation:dizzyStars 0.7s linear infinite;transform-origin:30px 20px;"><circle cx="30" cy="20" r="3" fill="#ffd040"/><line x1="30" y1="16" x2="30" y2="12" stroke="#ffd040" stroke-width="1.5"/></g>
+      <g style="animation:dizzyStars 0.7s linear .23s infinite;transform-origin:30px 20px;"><circle cx="30" cy="20" r="3" fill="#f080c0"/><line x1="30" y1="16" x2="30" y2="12" stroke="#f080c0" stroke-width="1.5"/></g>
+      <g style="animation:dizzyStars 0.7s linear .46s infinite;transform-origin:30px 20px;"><circle cx="30" cy="20" r="3" fill="#80c0ff"/><line x1="30" y1="16" x2="30" y2="12" stroke="#80c0ff" stroke-width="1.5"/></g>
+      <g style="animation:tailSpin 0.35s linear infinite;transform-origin:30px 65px;">
+        <path d="M30 65 Q18 70 16 60 Q14 52 22 52" stroke="#e07030" stroke-width="5" fill="none" stroke-linecap="round"/>
+      </g>
       <ellipse cx="30" cy="62" rx="16" ry="12" fill="#f08030"/>
       <ellipse cx="30" cy="60" rx="10" ry="8" fill="#fff0e0"/>
-      <ellipse cx="20" cy="73" rx="5" ry="4" fill="#e07030" style="animation:pawSwing 0.5s ease-in-out infinite alternate;transform-origin:20px 73px;"/>
-      <ellipse cx="40" cy="73" rx="5" ry="4" fill="#e07030" style="animation:pawSwing 0.5s ease-in-out .25s infinite alternate;transform-origin:40px 73px;"/>
-      <g style="animation:headBob 0.6s ease-in-out infinite alternate;transform-origin:30px 34px;">
+      <g style="animation:armFlail 0.4s ease-in-out infinite;transform-origin:18px 73px;">
+        <ellipse cx="18" cy="73" rx="5" ry="3.5" fill="#f09050"/>
+        <ellipse cx="14" cy="76" rx="4" ry="2.5" fill="#e07030"/>
+      </g>
+      <g style="animation:armFlailR 0.4s ease-in-out .2s infinite;transform-origin:42px 73px;">
+        <ellipse cx="42" cy="73" rx="5" ry="3.5" fill="#f09050"/>
+        <ellipse cx="46" cy="76" rx="4" ry="2.5" fill="#e07030"/>
+      </g>
+      <g style="animation:headBop 0.8s ease-in-out infinite;transform-origin:30px 34px;">
         <ellipse cx="30" cy="34" rx="20" ry="18" fill="#f08030"/>
         <path d="M12 22 L8 10 L20 20 Z" fill="#f08030" stroke="#e07030" stroke-width="1"/>
         <path d="M48 22 L52 10 L40 20 Z" fill="#f08030" stroke="#e07030" stroke-width="1"/>
@@ -423,25 +429,22 @@ def _make_editor_html(step: int, total: int, label: str, lang: str = "ja") -> st
         <ellipse cx="45" cy="18" rx="5" ry="7" fill="#f8c0c0"/>
         <ellipse cx="22" cy="32" rx="8" ry="9" fill="white"/>
         <ellipse cx="38" cy="32" rx="8" ry="9" fill="white"/>
-        <ellipse cx="22" cy="34" rx="5.5" ry="6" fill="#3040c0"/>
-        <ellipse cx="38" cy="34" rx="5.5" ry="6" fill="#3040c0"/>
+        <g style="animation:eyeDizzy 1.2s linear infinite;transform-origin:22px 34px;"><ellipse cx="22" cy="34" rx="5.5" ry="6" fill="#ff3060"/></g>
+        <g style="animation:eyeDizzy 1.2s linear .6s infinite;transform-origin:38px 34px;"><ellipse cx="38" cy="34" rx="5.5" ry="6" fill="#3060ff"/></g>
         <ellipse cx="22" cy="33" rx="3.5" ry="4.5" fill="#111"/>
         <ellipse cx="38" cy="33" rx="3.5" ry="4.5" fill="#111"/>
         <ellipse cx="21" cy="31" rx="1.5" ry="1.5" fill="white"/>
         <ellipse cx="37" cy="31" rx="1.5" ry="1.5" fill="white"/>
         <ellipse cx="30" cy="40" rx="3" ry="2" fill="#f06090"/>
-        <path d="M24 43 Q30 47 36 43" stroke="#c04070" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-        <line x1="12" y1="38" x2="24" y2="40" stroke="#c05010" stroke-width="1" opacity=".7"/>
-        <line x1="12" y1="41" x2="24" y2="41" stroke="#c05010" stroke-width="1" opacity=".7"/>
-        <line x1="48" y1="38" x2="36" y2="40" stroke="#c05010" stroke-width="1" opacity=".7"/>
-        <line x1="48" y1="41" x2="36" y2="41" stroke="#c05010" stroke-width="1" opacity=".7"/>
+        <path d="M24 44 Q30 40 36 44" stroke="#c04070" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+        <line x1="10" y1="37" x2="22" y2="40" stroke="#c05010" stroke-width="1" opacity=".7"/>
+        <line x1="10" y1="41" x2="22" y2="41" stroke="#c05010" stroke-width="1" opacity=".7"/>
+        <line x1="50" y1="37" x2="38" y2="40" stroke="#c05010" stroke-width="1" opacity=".7"/>
+        <line x1="50" y1="41" x2="38" y2="41" stroke="#c05010" stroke-width="1" opacity=".7"/>
         <ellipse cx="19" cy="36" rx="5" ry="3" fill="#f090b0" opacity=".5"/>
         <ellipse cx="41" cy="36" rx="5" ry="3" fill="#f090b0" opacity=".5"/>
-      </g>
-      <g style="animation:pencilWiggle 0.4s ease-in-out infinite alternate;transform-origin:48px 38px;">
-        <rect x="44" y="28" width="5" height="20" rx="2" fill="#f8d040" transform="rotate(30,46,38)"/>
-        <polygon points="0,-4 4,4 -4,4" fill="#e07030" transform="translate(52,44) rotate(30)"/>
-        <polygon points="0,-2 2,0 -2,0" fill="#ffd0a0" transform="translate(52,44) rotate(30)"/>
+        <g style="animation:sweat 0.9s ease-in infinite;"><ellipse cx="52" cy="22" rx="3" ry="5" fill="#80c0ff" opacity=".8"/></g>
+        <g style="animation:sweat 0.9s ease-in .45s infinite;"><ellipse cx="54" cy="18" rx="2" ry="4" fill="#80c0ff" opacity=".6"/></g>
       </g>
     </svg>
   </div>
@@ -451,13 +454,30 @@ def _make_editor_html(step: int, total: int, label: str, lang: str = "ja") -> st
   </div>
   <div style="position:absolute;bottom:16px;right:16px;font:bold 11px 'Courier New',monospace;color:{bar_color};">{pct}%</div>
   <style>
-    @keyframes tw{{from{{opacity:.08}}to{{opacity:.7}}}}
-    @keyframes walk{{0%{{left:20px}}50%{{left:calc(100% - 80px)}}100%{{left:20px}}}}
-    @keyframes bounce{{from{{bottom:30px}}to{{bottom:46px}}}}
-    @keyframes headBob{{from{{transform:translateY(0)}}to{{transform:translateY(-2px)}}}}
-    @keyframes pawSwing{{from{{transform:rotate(-15deg)}}to{{transform:rotate(15deg)}}}}
-    @keyframes tailSway{{from{{transform:rotate(-12deg)}}to{{transform:rotate(12deg)}}}}
-    @keyframes pencilWiggle{{from{{transform:rotate(-8deg)}}to{{transform:rotate(8deg)}}}}
+    @keyframes tw{{from{{opacity:.05}}to{{opacity:.7}}}}
+    @keyframes nekoWalk{{0%{{left:-70px}}100%{{left:calc(100% + 10px)}}}}
+    @keyframes breakdance{{
+      0%  {{transform:rotate(0deg) scaleX(1);}}
+      8%  {{transform:rotate(-25deg) scaleX(1);}}
+      16% {{transform:rotate(20deg) scaleX(-1);}}
+      24% {{transform:rotate(-15deg) scaleX(1) translateY(-8px);}}
+      32% {{transform:rotate(0deg) scaleX(1) translateY(-14px);}}
+      40% {{transform:rotate(180deg) scaleX(1) translateY(0px);}}
+      48% {{transform:rotate(360deg) scaleX(1);}}
+      56% {{transform:rotate(-30deg) scaleX(-1) translateY(-5px);}}
+      64% {{transform:rotate(15deg) scaleX(1) translateY(-10px);}}
+      72% {{transform:rotate(-360deg) scaleX(1);}}
+      80% {{transform:rotate(0deg) scaleX(1) translateY(-18px);}}
+      88% {{transform:rotate(10deg) scaleX(-1) translateY(-4px);}}
+      100%{{transform:rotate(0deg) scaleX(1);}}
+    }}
+    @keyframes headBop{{0%,100%{{transform:rotate(0deg);}}20%{{transform:rotate(-30deg);}}40%{{transform:rotate(25deg);}}60%{{transform:rotate(-20deg);}}80%{{transform:rotate(30deg);}}}}
+    @keyframes armFlail{{0%{{transform:rotate(-90deg) translateY(-12px);}}25%{{transform:rotate(120deg) translateY(8px);}}50%{{transform:rotate(-110deg) translateY(-16px);}}75%{{transform:rotate(80deg) translateY(4px);}}100%{{transform:rotate(-90deg) translateY(-12px);}}}}
+    @keyframes armFlailR{{0%{{transform:rotate(110deg) translateY(-16px);}}25%{{transform:rotate(-80deg) translateY(4px);}}50%{{transform:rotate(90deg) translateY(-12px);}}75%{{transform:rotate(-120deg) translateY(8px);}}100%{{transform:rotate(110deg) translateY(-16px);}}}}
+    @keyframes tailSpin{{0%{{transform:rotate(-40deg);}}50%{{transform:rotate(45deg);}}100%{{transform:rotate(-40deg);}}}}
+    @keyframes eyeDizzy{{0%,100%{{transform:rotate(0deg) scale(1);}}25%{{transform:rotate(180deg) scale(0.5);}}50%{{transform:rotate(360deg) scale(1.3);}}75%{{transform:rotate(540deg) scale(0.7);}}}}
+    @keyframes sweat{{0%,60%{{opacity:0;transform:translateY(0);}}70%{{opacity:1;}}100%{{opacity:0;transform:translateY(18px);}}}}
+    @keyframes dizzyStars{{0%{{transform:rotate(0deg) translateX(28px) rotate(0deg);}}100%{{transform:rotate(360deg) translateX(28px) rotate(-360deg);}}}}
   </style>
 </div>"""
 
