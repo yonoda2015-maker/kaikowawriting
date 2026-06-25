@@ -245,6 +245,15 @@ with st.sidebar:
         st.warning(f"⚠️ Threadsトークン期限まで {days_left}日")
 
     st.markdown("---")
+    use_multi_agent_global = st.toggle(
+        "🤖 マルチエージェントモード",
+        value=True,
+        key="global_multi_agent",
+        help="リサーチャー・プランナー・ライター・編集者・ファクトチェッカー・バズ分析の6エージェントが協議して執筆します。",
+    )
+    if use_multi_agent_global:
+        st.caption("全タブでマルチエージェント有効")
+    st.markdown("---")
 
     with st.expander("🔑 APIキーを設定する" + ("" if anthropic_ok else " ← まずここ！"), expanded=not anthropic_ok):
         st.caption("入力した情報はローカルの .env ファイルに保存されます")
@@ -968,15 +977,6 @@ with tab_novel:
 
     col1, col2 = st.columns([1, 1])
     with col1:
-        use_multi_n = st.toggle(
-            "🤖 マルチエージェントモード",
-            value=True,
-            key="novel_multi_agent",
-            help="リサーチャー・プランナー・ライター・編集者・ファクトチェッカー・バズ分析の6エージェントが協議して執筆します。",
-        )
-        if use_multi_n:
-            st.caption("🔬 リサーチ → 💬 協議 → ✍️ 執筆 → 🔍 矛盾チェック → ✂️ 編集 → 📊 バズ分析")
-        st.markdown("---")
         genre_n = st.selectbox("ジャンル", GENRES, key="novel_genre")
         st.caption(f"💡 {GENRE_DESC.get(genre_n, '')}")
 
@@ -1089,7 +1089,7 @@ with tab_novel:
                     spin_msg = f"小説を書いています...（約{novel_chars_input:,}字）" if output_lang_n == "ja" else f"Writing story (~{novel_chars_input:,} chars)..."
                     with st.spinner(spin_msg):
                         try:
-                            cn, title_n = run_novel_with_progress(genre_n, idea_text_n, novel_chars_input, get_x_safe(), style_hint_n, horror_level_n, output_lang_n, use_multi_agent=use_multi_n)
+                            cn, title_n = run_novel_with_progress(genre_n, idea_text_n, novel_chars_input, get_x_safe(), style_hint_n, horror_level_n, output_lang_n, use_multi_agent=use_multi_agent_global)
                             if st.session_state.get("novel_note_url") or st.session_state.get("novel_aff_url"):
                                 cn = add_monetization(cn, "novel", st.session_state.get("novel_aff_url", ""), st.session_state.get("novel_note_url", ""))
                             st.session_state.update({"novel_content": cn, "novel_pending": cn,
