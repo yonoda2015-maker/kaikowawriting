@@ -41,7 +41,11 @@ from multi_agent import (
     save_buzz_learning,
     load_top_buzz_patterns,
 )
-from viral_research import search_viral_posts, load_latest_research, build_viral_hint, xai_available
+from viral_research import (
+    search_viral_posts, load_latest_research, build_viral_hint,
+    fetch_safe_trends, load_latest_trends, build_trend_hint,
+    policy_check_content, grok_available, xai_available,
+)
 DB_PATH = Path(__file__).parent / "kowamoshiro.db"
 from threads_api import post_to_threads
 from auth import check_login, logout, is_auth_enabled
@@ -492,7 +496,7 @@ def _make_editor_html(step: int, total: int, label: str, lang: str = "ja") -> st
 </div>"""
 
 
-def run_novel_with_progress(genre, idea, chars, x_safe, style_hint, horror_level, lang, use_multi_agent: bool = True):
+def run_novel_with_progress(genre, idea, chars, x_safe, style_hint, horror_level, lang, use_multi_agent: bool = True, live_trends: list = None):
     """ねこ編集長進捗UIつきで小説を生成する。マルチエージェントモード対応。"""
     progress_slot = st.empty()
 
@@ -504,11 +508,13 @@ def run_novel_with_progress(genre, idea, chars, x_safe, style_hint, horror_level
 
     if use_multi_agent:
         top_patterns = load_top_buzz_patterns(str(DB_PATH))
+        _trend_hint = build_trend_hint(live_trends or [], genre)
+        _viral_hint = build_viral_hint(genre)
         result = multi_agent_generate_novel(
             genre, idea, chars,
             x_safe=x_safe, style_hint=style_hint, horror_level=horror_level,
             output_lang=lang, top_patterns=top_patterns, progress_cb=cb,
-            viral_hint=build_viral_hint(genre),
+            viral_hint="\n\n".join(filter(None, [_trend_hint, _viral_hint])),
         )
         # バズスコア保存
         if result and result[0]:
@@ -800,7 +806,21 @@ with tab_post:
                 st.error("⚠️ ネタを入力してください（STEP 3）")
             else:
                 try:
-                    _post_steps = ["ネタを分析中…", "文章を構成中…", "執筆中…", "仕上げ中…"]
+                    # Grokが使える場合は生成前にリアルタイムトレンドを取得
+                    _live_trends = []
+                    if grok_available():
+                        with st.spinner("🔍 Xのリアルタイムトレンドを取得中…"):
+                            try:
+                                _live_trends = load_latest_trends()
+                                if not _live_trends:
+                                    _live_trends = fetch_safe_trends(lang=output_lang_post)
+                            except Exception:
+                                _live_trends = []
+                    _trend_hint = build_trend_hint(_live_trends, genre)
+                    _viral_hint = build_viral_hint(genre)
+                    _combined_hint = "\n\n".join(filter(None, [_trend_hint, _viral_hint]))
+
+                    _post_steps = ["Xトレンド分析中…", "文章を構成中…", "執筆中…", "ポリシーチェック中…"]
                     def _gen_post(cb):
                         cb(1, 4, "ネタを分析中…")
                         if one_shot_mode:
@@ -815,7 +835,7 @@ with tab_post:
                             return ("ab", ra, rb)
                         else:
                             cb(2, 4, "執筆中…")
-                            r = generate_post_with_learning(genre, style, idea_text, char_count, get_x_safe(), top_patterns, style_hint=style_hint, horror_level=horror_level, viral_hint=build_viral_hint(genre))
+                            r = generate_post_with_learning(genre, style, idea_text, char_count, get_x_safe(), top_patterns, style_hint=style_hint, horror_level=horror_level, viral_hint=_combined_hint)
                             cb(4, 4, "完成！")
                             return ("post", r)
                     post_result = run_with_neko(_gen_post, _post_steps, lang=output_lang_post)
@@ -829,6 +849,13 @@ with tab_post:
                         content = post_result[1]
                         if note_url or aff_url:
                             content = add_monetization(content, "post", aff_url, note_url)
+                        # ポリシーチェック
+                        pc = policy_check_content(content)
+                        st.session_state["policy_check"] = pc
+                        if not pc["safe"]:
+                            st.session_state["post_content"] = content
+                            st.error(f"🚫 Xポリシー違反の可能性: {pc['reason']}\n{pc['fix_hint']}")
+                            st.stop()
                         st.session_state.update({"post_content": content, "post_pending": content, "post_score": calc_quality_score(content), "ab_content_a": None})
                     if auto_ht:
                         base = st.session_state["post_content"]
@@ -842,7 +869,11 @@ with tab_post:
                         db.advance_series(st.session_state.pop("advance_series_id"))
                     db.save_content("post", genre, style, st.session_state["post_content"], st.session_state["post_score"])
                     st.session_state.pop("date_idea", None)
-                    st.toast("✅ 生成が完了しました！右側を確認してください", icon="✅")
+                    pc = st.session_state.get("policy_check", {})
+                    if pc.get("level") == "warning":
+                        st.toast(f"⚠️ {pc['reason']}", icon="⚠️")
+                    else:
+                        st.toast("✅ 生成完了・ポリシーチェック通過！右側を確認してください", icon="✅")
                 except Exception as e:
                     logger.error(f"Post generation error: {e}")
                     st.error(f"生成中にエラーが発生しました: {e}")
@@ -1140,15 +1171,25 @@ with tab_novel:
                     spin_msg = f"小説を書いています...（約{novel_chars_input:,}字）" if output_lang_n == "ja" else f"Writing story (~{novel_chars_input:,} chars)..."
                     with st.spinner(spin_msg):
                         try:
-                            cn, title_n = run_novel_with_progress(genre_n, idea_text_n, novel_chars_input, get_x_safe(), style_hint_n, horror_level_n, output_lang_n, use_multi_agent=use_multi_agent_global)
+                            # Grokが使える場合はトレンドを事前取得
+                            if grok_available():
+                                _live_trends_n = load_latest_trends() or fetch_safe_trends(lang=output_lang_n)
+                            else:
+                                _live_trends_n = []
+                            cn, title_n = run_novel_with_progress(genre_n, idea_text_n, novel_chars_input, get_x_safe(), style_hint_n, horror_level_n, output_lang_n, use_multi_agent=use_multi_agent_global, live_trends=_live_trends_n)
                             if st.session_state.get("novel_note_url") or st.session_state.get("novel_aff_url"):
                                 cn = add_monetization(cn, "novel", st.session_state.get("novel_aff_url", ""), st.session_state.get("novel_note_url", ""))
+                            # ポリシーチェック
+                            pc_n = policy_check_content(cn)
                             st.session_state.update({"novel_content": cn, "novel_pending": cn,
                                                       "novel_score": calc_quality_score(cn), "novel_title": title_n, "novel_title_candidates": []})
                             if selected_idea_n:
                                 db.mark_idea_used(selected_idea_n["id"])
                             db.save_content("novel", genre_n, "", cn, st.session_state["novel_score"])
-                            st.toast("✅ 小説が完成しました！右側を確認してください", icon="📖")
+                            if pc_n.get("level") == "warning":
+                                st.toast(f"⚠️ {pc_n['reason']}", icon="⚠️")
+                            else:
+                                st.toast("✅ 小説が完成しました！ポリシーチェック通過", icon="📖")
                         except Exception as e:
                             logger.error(f"Novel error: {e}"); st.error(f"生成エラー: {e}")
         if not api_key_set():
