@@ -246,6 +246,87 @@ def build_syntax_instruction(template: dict) -> str:
 {template['example']}"""
 
 
+# ── パターン別エンゲージメント記録・学習 ──────────────────
+
+import sqlite3 as _sqlite3
+from pathlib import Path as _Path
+
+_ENGAGE_DB = _Path(__file__).parent / "kowamoshiro.db"
+
+def record_engagement(pattern_id: str, likes: int, content: str = ""):
+    """投稿のいいね数をパターンIDと一緒に記録する"""
+    conn = _sqlite3.connect(_ENGAGE_DB)
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS pattern_engagement (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pattern_id TEXT NOT NULL,
+                likes INTEGER NOT NULL,
+                content TEXT,
+                recorded_at TEXT NOT NULL
+            )
+        """)
+        conn.execute(
+            "INSERT INTO pattern_engagement (pattern_id, likes, content, recorded_at) VALUES (?,?,?,?)",
+            (pattern_id, likes, content, __import__('datetime').datetime.now().isoformat()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_pattern_stats() -> list[dict]:
+    """各パターンの平均いいね・投稿数・最高いいねを返す"""
+    conn = _sqlite3.connect(_ENGAGE_DB)
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS pattern_engagement (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pattern_id TEXT NOT NULL,
+                likes INTEGER NOT NULL,
+                content TEXT,
+                recorded_at TEXT NOT NULL
+            )
+        """)
+        rows = conn.execute("""
+            SELECT pattern_id, COUNT(*) as cnt, AVG(likes) as avg_likes, MAX(likes) as max_likes
+            FROM pattern_engagement
+            GROUP BY pattern_id
+        """).fetchall()
+    finally:
+        conn.close()
+
+    stats = {r[0]: {"cnt": r[1], "avg": round(r[2], 1), "max": r[3]} for r in rows}
+    result = []
+    for t in KAIKOWA_SYNTAX_TEMPLATES:
+        s = stats.get(t["id"], {"cnt": 0, "avg": 0.0, "max": 0})
+        result.append({**t, **s})
+    return result
+
+
+def get_weighted_next_template(current_index: int = -1) -> tuple[dict, int]:
+    """
+    エンゲージメントデータがあれば高いいねパターンを優先、
+    なければラウンドロビン。(template, next_index) を返す。
+    """
+    stats = get_pattern_stats()
+    total_posts = sum(s["cnt"] for s in stats)
+
+    if total_posts < 10:
+        # データ不足はラウンドロビン
+        return get_next_syntax_template(current_index)
+
+    # 重み = (avg_likes + 1) で正規化（未使用も最低1の重みを持つ）
+    weights = [(s["avg"] or 0) + 1 for s in stats]
+    total_w = sum(weights)
+    probs = [w / total_w for w in weights]
+
+    import random
+    chosen = random.choices(stats, weights=probs, k=1)[0]
+    idx = next(i for i, t in enumerate(KAIKOWA_SYNTAX_TEMPLATES) if t["id"] == chosen["id"])
+    return KAIKOWA_SYNTAX_TEMPLATES[idx], idx
+
+
 # まとめサイト・SNSバズ研究から導いた「バズるコンテンツの必要条件」
 # (出典: まとめサイト分析・Togetter人気まとめ構造研究・ホラー系SNS投稿エンゲージ分析)
 VIRAL_PATTERNS = {

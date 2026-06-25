@@ -23,6 +23,7 @@ from aozora import (
 )
 from agents import (
     get_next_syntax_template, build_syntax_instruction,
+    get_weighted_next_template, record_engagement, get_pattern_stats,
     generate_post, generate_novel, generate_article, generate_blog_post,
     fetch_trends, suggest_idea_from_trends,
     generate_hashtags, generate_optimized_hashtags,
@@ -251,16 +252,22 @@ with st.sidebar:
     st.markdown(f"{'✅' if threads_ok else '⬜'} Threads投稿{'（設定済み）' if threads_ok else '（任意）'}")
     st.markdown(f"{'✅' if openai_ok else '⬜'} DALL-E画像生成{'（設定済み）' if openai_ok else '（任意）'}")
     st.markdown(f"{'✅' if grok_ok else '⬜'} Grok X検索{'（ログイン済み）' if grok_ok else '（任意）'}")
-    # 現在の構文テンプレート表示
+    # 構文パターン成績表示
     from agents import KAIKOWA_SYNTAX_TEMPLATES
-    _cur_idx = st.session_state.get("syntax_template_idx", -1)
-    _cur_name = KAIKOWA_SYNTAX_TEMPLATES[(_cur_idx) % len(KAIKOWA_SYNTAX_TEMPLATES)]["name"] if _cur_idx >= 0 else "未使用"
-    _next_name = KAIKOWA_SYNTAX_TEMPLATES[(_cur_idx + 1) % len(KAIKOWA_SYNTAX_TEMPLATES)]["name"]
-    st.caption(f"📝 次の構文: **{_next_name}**（{(_cur_idx+2) % len(KAIKOWA_SYNTAX_TEMPLATES) + 1 if _cur_idx >= 0 else 1}/5）")
-    if st.button("⏭ 構文を手動で切り替える", key="sb_next_template", use_container_width=True):
-        _, _new_idx = get_next_syntax_template(st.session_state.get("syntax_template_idx", -1))
-        st.session_state["syntax_template_idx"] = _new_idx
-        st.rerun()
+    with st.expander("📊 構文パターン成績", expanded=False):
+        _stats = get_pattern_stats()
+        _total = sum(s["cnt"] for s in _stats)
+        if _total == 0:
+            st.caption("まだ記録なし。投稿後にいいね数を記録すると学習します。")
+        else:
+            st.caption(f"合計{_total}件記録済み")
+            for s in sorted(_stats, key=lambda x: x["avg"], reverse=True):
+                bar = "█" * min(int(s["avg"]), 20)
+                st.markdown(f"**{s['name']}** {s['cnt']}件 avg❤️{s['avg']} max❤️{s['max']}")
+        if st.button("⏭ 構文を手動で切り替える", key="sb_next_template", use_container_width=True):
+            _, _new_idx = get_next_syntax_template(st.session_state.get("syntax_template_idx", -1))
+            st.session_state["syntax_template_idx"] = _new_idx
+            st.rerun()
     if grok_ok:
         _acct_data = load_account_analysis("kaikowa_581")
         _acct_label = f"✅ @kaikowa_581 分析済（{_acct_data['analyzed_at'][:10]}）" if _acct_data else "⬜ @kaikowa_581 未分析"
@@ -863,10 +870,12 @@ with tab_post:
                                 _live_trends = []
                     _trend_hint = build_trend_hint(_live_trends, genre)
                     _viral_hint = build_viral_hint(genre)
-                    # 5パターン構文をラウンドロビンで使う
+                    # エンゲージメントデータで重み付け選択（データ不足時はラウンドロビン）
                     _tmpl_idx = st.session_state.get("syntax_template_idx", -1)
-                    _tmpl, _tmpl_idx = get_next_syntax_template(_tmpl_idx)
+                    _tmpl, _tmpl_idx = get_weighted_next_template(_tmpl_idx)
                     st.session_state["syntax_template_idx"] = _tmpl_idx
+                    st.session_state["last_pattern_id"] = _tmpl["id"]
+                    st.session_state["last_pattern_name"] = _tmpl["name"]
                     _syntax_hint = build_syntax_instruction(_tmpl)
                     _combined_hint = "\n\n".join(filter(None, [_syntax_hint, _trend_hint, _viral_hint]))
 
@@ -993,6 +1002,26 @@ with tab_post:
                         st.image(st.session_state["thumb_bytes"], use_container_width=True)
                         st.download_button("💾 画像を保存", data=st.session_state["thumb_bytes"],
                                            file_name="thumbnail.png", mime="image/png", use_container_width=True)
+
+            # いいね記録UI（投稿後に使う）
+            if edited_content and st.session_state.get("last_pattern_id"):
+                with st.expander(f"📊 このポストのいいね数を記録する（構文: {st.session_state.get('last_pattern_name','?')}）"):
+                    st.caption("投稿後のいいね数を記録すると、次回から効果的な構文を自動で優先します")
+                    _like_cols = st.columns([3, 1])
+                    with _like_cols[0]:
+                        _recorded_likes = st.number_input("いいね数", min_value=0, max_value=100000, value=0, step=1, key="post_likes_input")
+                    with _like_cols[1]:
+                        st.write("")
+                        st.write("")
+                        if st.button("記録", key="post_record_likes", use_container_width=True):
+                            record_engagement(
+                                st.session_state["last_pattern_id"],
+                                _recorded_likes,
+                                edited_content[:200],
+                            )
+                            st.success(f"✅ 記録しました！（{st.session_state['last_pattern_name']}: {_recorded_likes}いいね）")
+                            st.session_state.pop("last_pattern_id", None)
+                            st.session_state.pop("last_pattern_name", None)
 
             if edited_content:
                 full_post = post_full_text(edited_content, edited_hashtags)
