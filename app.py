@@ -661,15 +661,13 @@ with tab_post:
         selected_idea = None
 
         if idea_source == _x_trend_option:
-            # Xトレンドモード: トレンド一覧を表示して選択させる
-            with st.spinner("🔍 Xのリアルタイムトレンドを取得中…"):
-                _trends_now = load_latest_trends()
-                if not _trends_now:
-                    try:
-                        _trends_now = fetch_safe_trends(lang=output_lang_post if 'output_lang_post' in dir() else "ja")
-                    except Exception as e:
-                        st.error(f"トレンド取得エラー: {e}")
-                        _trends_now = []
+            # Xトレンドモード: 毎回リアルタイムで取得
+            with st.spinner("📡 Xのリアルタイムトレンドを取得中…"):
+                try:
+                    _trends_now = fetch_safe_trends(lang=output_lang_post if 'output_lang_post' in dir() else "ja")
+                except Exception as e:
+                    st.error(f"トレンド取得エラー: {e}")
+                    _trends_now = []
             if _trends_now:
                 _trend_opts = {f"【{t['topic']}】 {t.get('why_viral','')}": t for t in _trends_now}
                 _sel_trend = st.selectbox("バズっているトレンドを選んでください", list(_trend_opts.keys()), key="post_trend_select")
@@ -829,15 +827,14 @@ with tab_post:
                 st.error("⚠️ ネタを入力してください（STEP 3）")
             else:
                 try:
-                    # トレンドモード or 通常モードでトレンド取得
+                    # 生成のたびに毎回Xからリアルタイムトレンドを取得
                     _live_trends = []
                     if grok_available():
-                        try:
-                            _live_trends = load_latest_trends()
-                            if not _live_trends:
+                        with st.spinner("📡 Xのリアルタイムトレンドを取得中…"):
+                            try:
                                 _live_trends = fetch_safe_trends(lang=output_lang_post)
-                        except Exception:
-                            _live_trends = []
+                            except Exception:
+                                _live_trends = []
                     _trend_hint = build_trend_hint(_live_trends, genre)
                     _viral_hint = build_viral_hint(genre)
                     _combined_hint = "\n\n".join(filter(None, [_trend_hint, _viral_hint]))
@@ -1193,11 +1190,13 @@ with tab_novel:
                     spin_msg = f"小説を書いています...（約{novel_chars_input:,}字）" if output_lang_n == "ja" else f"Writing story (~{novel_chars_input:,} chars)..."
                     with st.spinner(spin_msg):
                         try:
-                            # Grokが使える場合はトレンドを事前取得
+                            # 生成のたびに毎回Xからリアルタイムトレンドを取得
+                            _live_trends_n = []
                             if grok_available():
-                                _live_trends_n = load_latest_trends() or fetch_safe_trends(lang=output_lang_n)
-                            else:
-                                _live_trends_n = []
+                                try:
+                                    _live_trends_n = fetch_safe_trends(lang=output_lang_n)
+                                except Exception:
+                                    _live_trends_n = []
                             cn, title_n = run_novel_with_progress(genre_n, idea_text_n, novel_chars_input, get_x_safe(), style_hint_n, horror_level_n, output_lang_n, use_multi_agent=use_multi_agent_global, live_trends=_live_trends_n)
                             if st.session_state.get("novel_note_url") or st.session_state.get("novel_aff_url"):
                                 cn = add_monetization(cn, "novel", st.session_state.get("novel_aff_url", ""), st.session_state.get("novel_note_url", ""))

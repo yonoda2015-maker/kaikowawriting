@@ -145,7 +145,7 @@ def _save_trends(trends: list[dict]):
 
 
 def load_latest_trends() -> list[dict]:
-    """最新の安全トレンドをDBから読む（3時間以内なら再利用）"""
+    """DBに保存された最新トレンドを返す（参照用）"""
     conn = sqlite3.connect(DB_PATH)
     try:
         conn.execute("""
@@ -156,17 +156,14 @@ def load_latest_trends() -> list[dict]:
             )
         """)
         row = conn.execute(
-            "SELECT fetched_at, trends_json FROM safe_trends ORDER BY id DESC LIMIT 1"
+            "SELECT trends_json FROM safe_trends ORDER BY id DESC LIMIT 1"
         ).fetchone()
     finally:
         conn.close()
 
     if not row:
         return []
-    fetched_at = datetime.fromisoformat(row[0])
-    if datetime.now() - fetched_at > timedelta(hours=3):
-        return []  # 3時間超えたら再取得を促す
-    return json.loads(row[1] or "[]")
+    return json.loads(row[0] or "[]")
 
 
 def build_trend_hint(trends: list[dict], genre: str) -> str:
