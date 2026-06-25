@@ -237,11 +237,14 @@ with st.sidebar:
     anthropic_ok = api_key_set()
     threads_ok   = bool(os.getenv("THREADS_ACCESS_TOKEN")) and bool(os.getenv("THREADS_USER_ID"))
     openai_ok    = bool(os.getenv("OPENAI_API_KEY"))
+    from viral_research import grok_available
+    grok_ok      = grok_available()
 
     st.markdown("**📊 セットアップ状況**")
     st.markdown(f"{'✅' if anthropic_ok else '❌'} Claude APIキー{'（設定済み）' if anthropic_ok else '（**必須**）'}")
     st.markdown(f"{'✅' if threads_ok else '⬜'} Threads投稿{'（設定済み）' if threads_ok else '（任意）'}")
     st.markdown(f"{'✅' if openai_ok else '⬜'} DALL-E画像生成{'（設定済み）' if openai_ok else '（任意）'}")
+    st.markdown(f"{'✅' if grok_ok else '⬜'} Grok X検索{'（ログイン済み）' if grok_ok else '（任意）'}")
     if not anthropic_ok:
         st.warning("⚠️ 文章を生成するにはClaude APIキーが必要です")
 
@@ -263,15 +266,12 @@ with st.sidebar:
                                            help="数字のID（@ではない）")
         new_openai         = st.text_input("OpenAI APIキー（任意・画像生成）", value=os.getenv("OPENAI_API_KEY", ""), type="password", key="sb_openai")
         new_serper         = st.text_input("Serper APIキー（任意・Web検索）", value=os.getenv("SERPER_API_KEY", ""), type="password", key="sb_serper")
-        new_xai            = st.text_input("xAI APIキー（任意・Grok X検索）", value=os.getenv("XAI_API_KEY", ""), type="password", key="sb_xai",
-                                           help="console.x.ai で取得。ジャンル別バズりパターンをXからリサーチします")
         if st.button("💾 保存する", type="primary", key="sb_save_keys", use_container_width=True):
             if not ENV_PATH.exists():
                 ENV_PATH.touch()
             for key, val in [
                 ("ANTHROPIC_API_KEY", new_anthropic), ("THREADS_ACCESS_TOKEN", new_threads_token),
                 ("THREADS_USER_ID", new_threads_uid), ("OPENAI_API_KEY", new_openai), ("SERPER_API_KEY", new_serper),
-                ("XAI_API_KEY", new_xai),
             ]:
                 if val:
                     set_key(str(ENV_PATH), key, val)
@@ -605,8 +605,8 @@ with tab_post:
                         except Exception as e:
                             st.error(f"検索エラー: {e}")
             else:
-                st.info("XAI_API_KEY を .env に設定すると、Grok Build が X のバズり投稿を検索して生成に反映します。")
-                st.code("XAI_API_KEY=xai-xxxx", language="bash")
+                st.info("Grok CLIでログインすると、Grok Build が X のバズり投稿をリアルタイム検索して生成に反映します。")
+                st.code("curl -fsSL https://x.ai/cli/install.sh | bash\ngrok login --device-auth", language="bash")
 
         st.markdown("### STEP 2　スタイルを選ぶ")
         st.caption("投稿の「語り口」です。迷ったら「独り言・日記風」がおすすめ")
@@ -1028,8 +1028,8 @@ with tab_novel:
                         except Exception as e:
                             st.error(f"検索エラー: {e}")
             else:
-                st.info("XAI_API_KEY を .env に設定すると、Grok Build が X のバズり投稿を検索して生成に反映します。")
-                st.code("XAI_API_KEY=xai-xxxx", language="bash")
+                st.info("Grok CLIでログインすると、Grok Build が X のバズり投稿をリアルタイム検索して生成に反映します。")
+                st.code("curl -fsSL https://x.ai/cli/install.sh | bash\ngrok login --device-auth", language="bash")
 
         st.markdown("**文字数を決める**")
         st.caption("迷ったら「中編（3,000字）」がおすすめです")
