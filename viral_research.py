@@ -75,6 +75,154 @@ def grok_available() -> bool:
 
 
 # ────────────────────────────────────────────────
+# 0. アカウント分析（自アカウントの文体・構文学習）
+# ────────────────────────────────────────────────
+
+_ACCOUNT_CACHE_TABLE = """
+    CREATE TABLE IF NOT EXISTS account_analysis (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account TEXT NOT NULL,
+        analyzed_at TEXT NOT NULL,
+        analysis_json TEXT NOT NULL
+    )
+"""
+
+def analyze_account(account: str = "kaikowa_581", limit: int = 20) -> dict:
+    """
+    @account の直近投稿をGrok X Searchで取得・分析し、
+    「このアカウントに最適な投稿構文」を抽出する。
+
+    Returns:
+        {
+          "account": str,
+          "top_posts": [...],          # いいね上位の投稿
+          "style_profile": {
+            "opening_pattern": str,    # 冒頭パターン（例: 「体言止め」「疑問形」）
+            "sentence_length": str,    # 文の長さの傾向
+            "paragraph_structure": str,# 段落構成
+            "emoji_usage": str,        # 絵文字の使い方
+            "hashtag_style": str,      # ハッシュタグの傾向
+            "hook_formula": str,       # バズった投稿に共通するフック公式
+            "ending_pattern": str,     # 締め方のパターン
+          },
+          "best_syntax_template": str, # 最もバズる構文テンプレート
+          "do_list": [...],            # やるべきこと
+          "dont_list": [...],          # やってはいけないこと
+          "analyzed_at": str,
+        }
+    """
+    prompt = f"""@{account} のXアカウントを分析してください。
+
+1. まず直近の投稿を{limit}件検索して取得する
+2. その中でいいね数・RT数が多い上位5件を特定する
+3. 以下を分析する:
+
+【文体・構文分析】
+- 冒頭（最初の一文）のパターン（体言止め・疑問形・数字始まり・「〜した」など）
+- 文の長さと改行の使い方
+- 段落構成（起承転結 / 列挙 / 一文完結 など）
+- 絵文字の使い方・位置・頻度
+- ハッシュタグの数・位置・ジャンル
+- バズった投稿に共通するフック公式
+- 締め方のパターン（余韻・問いかけ・衝撃落ち など）
+
+以下のJSON形式で返してください:
+{{
+  "account": "{account}",
+  "top_posts": [
+    {{"text": "投稿本文（冒頭150字）", "likes": 0, "retweets": 0, "why_viral": "理由"}}
+  ],
+  "style_profile": {{
+    "opening_pattern": "...",
+    "sentence_length": "...",
+    "paragraph_structure": "...",
+    "emoji_usage": "...",
+    "hashtag_style": "...",
+    "hook_formula": "...",
+    "ending_pattern": "..."
+  }},
+  "best_syntax_template": "実際に使える構文テンプレート（穴埋め形式）",
+  "do_list": ["やるべきこと1", "やるべきこと2", "やるべきこと3"],
+  "dont_list": ["やってはいけないこと1", "やってはいけないこと2"]
+}}"""
+
+    raw = _grok_chat(prompt, days=90)
+
+    try:
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        data = json.loads(raw[start:end]) if start >= 0 else {}
+    except json.JSONDecodeError:
+        data = {}
+
+    data.setdefault("account", account)
+    data.setdefault("top_posts", [])
+    data.setdefault("style_profile", {})
+    data.setdefault("best_syntax_template", raw)
+    data.setdefault("do_list", [])
+    data.setdefault("dont_list", [])
+    data["analyzed_at"] = datetime.now().isoformat()
+
+    _save_account_analysis(account, data)
+    return data
+
+
+def _save_account_analysis(account: str, data: dict):
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.execute(_ACCOUNT_CACHE_TABLE)
+        conn.execute(
+            "INSERT INTO account_analysis (account, analyzed_at, analysis_json) VALUES (?,?,?)",
+            (account, data["analyzed_at"], json.dumps(data, ensure_ascii=False)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def load_account_analysis(account: str = "kaikowa_581") -> Optional[dict]:
+    """最新のアカウント分析をDBから取得"""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.execute(_ACCOUNT_CACHE_TABLE)
+        row = conn.execute(
+            "SELECT analysis_json FROM account_analysis WHERE account=? ORDER BY id DESC LIMIT 1",
+            (account,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    return json.loads(row[0])
+
+
+def build_account_syntax_hint(account: str = "kaikowa_581") -> str:
+    """アカウント分析からプロンプト注入テキストを生成"""
+    data = load_account_analysis(account)
+    if not data:
+        return ""
+    sp = data.get("style_profile", {})
+    tmpl = data.get("best_syntax_template", "")
+    do_list = data.get("do_list", [])
+    dont_list = data.get("dont_list", [])
+
+    lines = [f"【@{account} に最適な投稿構文（このスタイルで書くこと）】"]
+    if tmpl:
+        lines.append(f"構文テンプレート: {tmpl}")
+    if sp.get("opening_pattern"):
+        lines.append(f"冒頭パターン: {sp['opening_pattern']}")
+    if sp.get("hook_formula"):
+        lines.append(f"フック公式: {sp['hook_formula']}")
+    if sp.get("ending_pattern"):
+        lines.append(f"締め方: {sp['ending_pattern']}")
+    if do_list:
+        lines.append("必須: " + " / ".join(do_list[:3]))
+    if dont_list:
+        lines.append("禁止: " + " / ".join(dont_list[:2]))
+    return "\n".join(lines)
+
+
+# ────────────────────────────────────────────────
 # 1. リアルタイム安全トレンド取得
 # ────────────────────────────────────────────────
 

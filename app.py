@@ -45,6 +45,7 @@ from viral_research import (
     search_viral_posts, load_latest_research, build_viral_hint,
     fetch_safe_trends, load_latest_trends, build_trend_hint,
     policy_check_content, grok_available, xai_available,
+    analyze_account, load_account_analysis, build_account_syntax_hint,
 )
 DB_PATH = Path(__file__).parent / "kowamoshiro.db"
 from threads_api import post_to_threads
@@ -249,6 +250,19 @@ with st.sidebar:
     st.markdown(f"{'✅' if threads_ok else '⬜'} Threads投稿{'（設定済み）' if threads_ok else '（任意）'}")
     st.markdown(f"{'✅' if openai_ok else '⬜'} DALL-E画像生成{'（設定済み）' if openai_ok else '（任意）'}")
     st.markdown(f"{'✅' if grok_ok else '⬜'} Grok X検索{'（ログイン済み）' if grok_ok else '（任意）'}")
+    if grok_ok:
+        _acct_data = load_account_analysis("kaikowa_581")
+        _acct_label = f"✅ @kaikowa_581 分析済（{_acct_data['analyzed_at'][:10]}）" if _acct_data else "⬜ @kaikowa_581 未分析"
+        st.markdown(_acct_label)
+        if st.button("🔍 @kaikowa_581 を分析する", key="sb_analyze_account", use_container_width=True,
+                     help="アカウントの投稿を分析してベスト構文を学習します（1〜2分）"):
+            with st.spinner("@kaikowa_581 の投稿を分析中…"):
+                try:
+                    _result = analyze_account("kaikowa_581")
+                    st.success(f"✅ 分析完了！上位{len(_result.get('top_posts',[]))}件のバズり投稿から構文を抽出しました")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"分析エラー: {e}")
     if not anthropic_ok:
         st.warning("⚠️ 文章を生成するにはClaude APIキーが必要です")
 
@@ -510,11 +524,12 @@ def run_novel_with_progress(genre, idea, chars, x_safe, style_hint, horror_level
         top_patterns = load_top_buzz_patterns(str(DB_PATH))
         _trend_hint = build_trend_hint(live_trends or [], genre)
         _viral_hint = build_viral_hint(genre)
+        _account_hint = build_account_syntax_hint("kaikowa_581")
         result = multi_agent_generate_novel(
             genre, idea, chars,
             x_safe=x_safe, style_hint=style_hint, horror_level=horror_level,
             output_lang=lang, top_patterns=top_patterns, progress_cb=cb,
-            viral_hint="\n\n".join(filter(None, [_trend_hint, _viral_hint])),
+            viral_hint="\n\n".join(filter(None, [_account_hint, _trend_hint, _viral_hint])),
         )
         # バズスコア保存
         if result and result[0]:
@@ -837,7 +852,8 @@ with tab_post:
                                 _live_trends = []
                     _trend_hint = build_trend_hint(_live_trends, genre)
                     _viral_hint = build_viral_hint(genre)
-                    _combined_hint = "\n\n".join(filter(None, [_trend_hint, _viral_hint]))
+                    _account_hint = build_account_syntax_hint("kaikowa_581")
+                    _combined_hint = "\n\n".join(filter(None, [_account_hint, _trend_hint, _viral_hint]))
 
                     _post_steps = ["Xトレンド分析中…", "文章を構成中…", "執筆中…", "ポリシーチェック中…"]
                     def _gen_post(cb):
