@@ -987,6 +987,16 @@ with tab_novel:
                 note_url_n = st.text_input("noteのURL", key="novel_note_url")
                 aff_url_n  = st.text_input("アフィリエイトURL", key="novel_aff_url")
 
+        st.markdown("---")
+        use_multi_n = st.toggle(
+            "🤖 マルチエージェントモード（推奨）",
+            value=True,
+            key="novel_multi_agent",
+            help="リサーチャー・プランナー・ライター・編集者・ファクトチェッカー・バズ分析の6エージェントが協議して執筆します。生成時間が長くなりますが品質が向上します。",
+        )
+        if use_multi_n:
+            st.caption("🔬 リサーチ → 💬 協議 → ✍️ 執筆 → 🔍 矛盾チェック → ✂️ 編集 → 📊 バズ分析")
+
         if tips_mode_n:
             if st.button("🔥 TIPSコンテンツを生成する（4章構成・約4,800字）",
                          type="primary", key="novel_tips_generate", use_container_width=True, disabled=not api_key_set()):
@@ -1017,15 +1027,6 @@ with tab_novel:
                             logger.error(f"TIPS error: {e}"); st.error(f"生成エラー: {e}")
         else:
             st.session_state["tips_mode_active"] = False
-            use_multi_n = st.toggle(
-                "🤖 マルチエージェントモード（推奨）",
-                value=True,
-                key="novel_multi_agent",
-                help="リサーチャー・プランナー・ライター・編集者・ファクトチェッカー・バズ分析の6エージェントが協議して執筆します。生成時間が長くなりますが品質が向上します。",
-            )
-            if use_multi_n:
-                st.caption("🔬 リサーチ → 💬 エージェント協議 → ✍️ 執筆 → 🔍 矛盾チェック → ✂️ 編集 → 📊 バズ分析 の順で生成します")
-
             if st.button(f"🔥 小説を生成する（約{novel_chars_input:,}字）",
                          type="primary", key="novel_generate", use_container_width=True, disabled=not api_key_set()):
                 if not require_api_key():
