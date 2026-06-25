@@ -225,6 +225,12 @@ def require_api_key() -> bool:
 # ── サイドバー ────────────────────────────────────
 with st.sidebar:
     st.markdown("# 👻 こわ面白い\nコンテンツ生成ツール")
+    use_multi_agent_global = st.toggle(
+        "🤖 マルチエージェントON",
+        value=True,
+        key="global_multi_agent",
+        help="6エージェント（リサーチ・プラン・執筆・編集・ファクトチェック・バズ分析）が協議して生成します",
+    )
     st.markdown("---")
 
     anthropic_ok = api_key_set()
@@ -244,15 +250,6 @@ with st.sidebar:
     if days_left is not None and days_left <= 14:
         st.warning(f"⚠️ Threadsトークン期限まで {days_left}日")
 
-    st.markdown("---")
-    use_multi_agent_global = st.toggle(
-        "🤖 マルチエージェントモード",
-        value=True,
-        key="global_multi_agent",
-        help="リサーチャー・プランナー・ライター・編集者・ファクトチェッカー・バズ分析の6エージェントが協議して執筆します。",
-    )
-    if use_multi_agent_global:
-        st.caption("全タブでマルチエージェント有効")
     st.markdown("---")
 
     with st.expander("🔑 APIキーを設定する" + ("" if anthropic_ok else " ← まずここ！"), expanded=not anthropic_ok):
