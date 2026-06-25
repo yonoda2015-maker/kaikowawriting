@@ -1924,7 +1924,8 @@ def build_learning_hint(top_patterns: list[dict]) -> str:
 
 def generate_post_with_learning(genre: str, style: str, idea: str, char_count: int,
                                  x_safe: bool, top_patterns: list[dict],
-                                 style_hint: str = "", horror_level: int = 3) -> str:
+                                 style_hint: str = "", horror_level: int = 3,
+                                 viral_hint: str = "") -> str:
     hint       = build_learning_hint(top_patterns)
     genre_desc = GENRE_DESCRIPTIONS.get(genre, genre)
     style_desc = STYLE_DESCRIPTIONS.get(style, style)
@@ -1943,6 +1944,7 @@ def generate_post_with_learning(genre: str, style: str, idea: str, char_count: i
 {ANTI_AI_RULES}
 {policy}
 {hint}
+{viral_hint}
 {style_hint}
 {imi_rule}
 

@@ -41,6 +41,7 @@ from multi_agent import (
     save_buzz_learning,
     load_top_buzz_patterns,
 )
+from viral_research import search_viral_posts, load_latest_research, build_viral_hint, xai_available
 DB_PATH = Path(__file__).parent / "kowamoshiro.db"
 from threads_api import post_to_threads
 from auth import check_login, logout, is_auth_enabled
@@ -262,12 +263,15 @@ with st.sidebar:
                                            help="数字のID（@ではない）")
         new_openai         = st.text_input("OpenAI APIキー（任意・画像生成）", value=os.getenv("OPENAI_API_KEY", ""), type="password", key="sb_openai")
         new_serper         = st.text_input("Serper APIキー（任意・Web検索）", value=os.getenv("SERPER_API_KEY", ""), type="password", key="sb_serper")
+        new_xai            = st.text_input("xAI APIキー（任意・Grok X検索）", value=os.getenv("XAI_API_KEY", ""), type="password", key="sb_xai",
+                                           help="console.x.ai で取得。ジャンル別バズりパターンをXからリサーチします")
         if st.button("💾 保存する", type="primary", key="sb_save_keys", use_container_width=True):
             if not ENV_PATH.exists():
                 ENV_PATH.touch()
             for key, val in [
                 ("ANTHROPIC_API_KEY", new_anthropic), ("THREADS_ACCESS_TOKEN", new_threads_token),
                 ("THREADS_USER_ID", new_threads_uid), ("OPENAI_API_KEY", new_openai), ("SERPER_API_KEY", new_serper),
+                ("XAI_API_KEY", new_xai),
             ]:
                 if val:
                     set_key(str(ENV_PATH), key, val)
@@ -504,6 +508,7 @@ def run_novel_with_progress(genre, idea, chars, x_safe, style_hint, horror_level
             genre, idea, chars,
             x_safe=x_safe, style_hint=style_hint, horror_level=horror_level,
             output_lang=lang, top_patterns=top_patterns, progress_cb=cb,
+            viral_hint=build_viral_hint(genre),
         )
         # バズスコア保存
         if result and result[0]:
@@ -577,6 +582,31 @@ with tab_post:
         st.markdown("### STEP 1　ジャンルを選ぶ")
         genre = st.radio("どんなジャンルにしますか？", GENRES, key="post_genre")
         st.caption(f"💡 {GENRE_DESC.get(genre, '')}")
+
+        # X バズりリサーチ
+        with st.expander("🔍 X バズりリサーチ（Grok Build）", expanded=False):
+            if xai_available():
+                latest_r = load_latest_research(genre)
+                if latest_r:
+                    st.caption(f"最終検索: {latest_r['searched_at'][:16]}")
+                    for p in latest_r.get("posts", [])[:3]:
+                        st.markdown(f"**@{p.get('account','')}** ❤️{p.get('likes','')}  \n{p.get('text','')[:80]}...  \n_{p.get('reason','')}_")
+                    hooks = latest_r.get("hook_templates", [])
+                    if hooks:
+                        st.markdown("**フック文例（生成に反映）:**")
+                        for h in hooks:
+                            st.markdown(f"- {h}")
+                if st.button("🔍 今すぐXを検索してバズりパターンを更新", key="post_x_search", use_container_width=True):
+                    with st.spinner("Grok Build が X を検索中..."):
+                        try:
+                            result = search_viral_posts(genre)
+                            st.success(f"✅ {len(result.get('posts',[]))}件の投稿を分析しました")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"検索エラー: {e}")
+            else:
+                st.info("XAI_API_KEY を .env に設定すると、Grok Build が X のバズり投稿を検索して生成に反映します。")
+                st.code("XAI_API_KEY=xai-xxxx", language="bash")
 
         st.markdown("### STEP 2　スタイルを選ぶ")
         st.caption("投稿の「語り口」です。迷ったら「独り言・日記風」がおすすめ")
@@ -785,7 +815,7 @@ with tab_post:
                             return ("ab", ra, rb)
                         else:
                             cb(2, 4, "執筆中…")
-                            r = generate_post_with_learning(genre, style, idea_text, char_count, get_x_safe(), top_patterns, style_hint=style_hint, horror_level=horror_level)
+                            r = generate_post_with_learning(genre, style, idea_text, char_count, get_x_safe(), top_patterns, style_hint=style_hint, horror_level=horror_level, viral_hint=build_viral_hint(genre))
                             cb(4, 4, "完成！")
                             return ("post", r)
                     post_result = run_with_neko(_gen_post, _post_steps, lang=output_lang_post)
@@ -976,6 +1006,30 @@ with tab_novel:
     with col1:
         genre_n = st.selectbox("ジャンル", GENRES, key="novel_genre")
         st.caption(f"💡 {GENRE_DESC.get(genre_n, '')}")
+
+        with st.expander("🔍 X バズりリサーチ（Grok Build）", expanded=False):
+            if xai_available():
+                latest_rn = load_latest_research(genre_n)
+                if latest_rn:
+                    st.caption(f"最終検索: {latest_rn['searched_at'][:16]}")
+                    for p in latest_rn.get("posts", [])[:3]:
+                        st.markdown(f"**@{p.get('account','')}** ❤️{p.get('likes','')}  \n{p.get('text','')[:80]}...  \n_{p.get('reason','')}_")
+                    hooks = latest_rn.get("hook_templates", [])
+                    if hooks:
+                        st.markdown("**フック文例（生成に反映）:**")
+                        for h in hooks:
+                            st.markdown(f"- {h}")
+                if st.button("🔍 今すぐXを検索してバズりパターンを更新", key="novel_x_search", use_container_width=True):
+                    with st.spinner("Grok Build が X を検索中..."):
+                        try:
+                            result = search_viral_posts(genre_n)
+                            st.success(f"✅ {len(result.get('posts',[]))}件の投稿を分析しました")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"検索エラー: {e}")
+            else:
+                st.info("XAI_API_KEY を .env に設定すると、Grok Build が X のバズり投稿を検索して生成に反映します。")
+                st.code("XAI_API_KEY=xai-xxxx", language="bash")
 
         st.markdown("**文字数を決める**")
         st.caption("迷ったら「中編（3,000字）」がおすすめです")

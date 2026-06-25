@@ -318,6 +318,7 @@ def multi_agent_generate_novel(
     output_lang: str = "ja",
     top_patterns: list[dict] | None = None,
     progress_cb=None,
+    viral_hint: str = "",
 ) -> tuple[str, str]:
     """
     マルチエージェント協議による小説生成。
@@ -356,6 +357,7 @@ def multi_agent_generate_novel(
 ジャンル: {genre}
 ネタ: {idea}
 {_get_horror_level_instruction(horror_level)}
+{viral_hint}
 
 このネタを深堀りせよ:
 ・心理的フック（読者が不安になる核心）
