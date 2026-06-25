@@ -647,17 +647,40 @@ with tab_post:
             style_b = st.selectbox("比較スタイルB", [s for s in STYLES if s != style], key="post_style_b") if ab_mode else STYLES[0]
 
         st.markdown("### STEP 3　ネタを入力する")
+        _x_trend_option = "📡 Xトレンドをネタにする（自動）"
+        _idea_options = [_x_trend_option] if grok_available() else []
+        _idea_options += ["💡 ネタバンクから選ぶ（おすすめ）", "✏️ 自分で入力する",
+                          "🔥 今日のニュースから提案", "📅 今日の日付に関連したネタ", "📺 シリーズものを作る"]
         idea_source = st.radio(
             "ネタの選び方",
-            ["💡 ネタバンクから選ぶ（おすすめ）", "✏️ 自分で入力する",
-             "🔥 今日のニュースから提案", "📅 今日の日付に関連したネタ", "📺 シリーズものを作る"],
+            _idea_options,
             key="post_idea_source",
         )
 
         idea_text = ""
         selected_idea = None
 
-        if idea_source == "💡 ネタバンクから選ぶ（おすすめ）":
+        if idea_source == _x_trend_option:
+            # Xトレンドモード: トレンド一覧を表示して選択させる
+            with st.spinner("🔍 Xのリアルタイムトレンドを取得中…"):
+                _trends_now = load_latest_trends()
+                if not _trends_now:
+                    try:
+                        _trends_now = fetch_safe_trends(lang=output_lang_post if 'output_lang_post' in dir() else "ja")
+                    except Exception as e:
+                        st.error(f"トレンド取得エラー: {e}")
+                        _trends_now = []
+            if _trends_now:
+                _trend_opts = {f"【{t['topic']}】 {t.get('why_viral','')}": t for t in _trends_now}
+                _sel_trend = st.selectbox("バズっているトレンドを選んでください", list(_trend_opts.keys()), key="post_trend_select")
+                _chosen = _trend_opts[_sel_trend]
+                idea_text = f"{_chosen['topic']}のトレンドに絡めた{genre}の話。{_chosen.get('horror_angle','')}"
+                st.caption(f"💡 自動生成ネタ: {idea_text}")
+            else:
+                st.info("トレンドを取得できませんでした。別のネタ選択方法をお使いください。")
+                idea_text = ""
+
+        elif idea_source == "💡 ネタバンクから選ぶ（おすすめ）":
             show_all = st.toggle("全ジャンルを表示する", False, key="post_idea_show_all",
                                  help="ONにすると他のジャンルのネタも表示されます")
             ideas = db.get_all_ideas(None if show_all else genre)
@@ -802,20 +825,19 @@ with tab_post:
         if generate_btn:
             if not require_api_key():
                 pass
-            elif not idea_text.strip():
+            elif not idea_text.strip() and idea_source != _x_trend_option:
                 st.error("⚠️ ネタを入力してください（STEP 3）")
             else:
                 try:
-                    # Grokが使える場合は生成前にリアルタイムトレンドを取得
+                    # トレンドモード or 通常モードでトレンド取得
                     _live_trends = []
                     if grok_available():
-                        with st.spinner("🔍 Xのリアルタイムトレンドを取得中…"):
-                            try:
-                                _live_trends = load_latest_trends()
-                                if not _live_trends:
-                                    _live_trends = fetch_safe_trends(lang=output_lang_post)
-                            except Exception:
-                                _live_trends = []
+                        try:
+                            _live_trends = load_latest_trends()
+                            if not _live_trends:
+                                _live_trends = fetch_safe_trends(lang=output_lang_post)
+                        except Exception:
+                            _live_trends = []
                     _trend_hint = build_trend_hint(_live_trends, genre)
                     _viral_hint = build_viral_hint(genre)
                     _combined_hint = "\n\n".join(filter(None, [_trend_hint, _viral_hint]))
