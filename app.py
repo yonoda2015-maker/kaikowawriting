@@ -968,6 +968,15 @@ with tab_novel:
 
     col1, col2 = st.columns([1, 1])
     with col1:
+        use_multi_n = st.toggle(
+            "🤖 マルチエージェントモード",
+            value=True,
+            key="novel_multi_agent",
+            help="リサーチャー・プランナー・ライター・編集者・ファクトチェッカー・バズ分析の6エージェントが協議して執筆します。",
+        )
+        if use_multi_n:
+            st.caption("🔬 リサーチ → 💬 協議 → ✍️ 執筆 → 🔍 矛盾チェック → ✂️ 編集 → 📊 バズ分析")
+        st.markdown("---")
         genre_n = st.selectbox("ジャンル", GENRES, key="novel_genre")
         st.caption(f"💡 {GENRE_DESC.get(genre_n, '')}")
 
@@ -1040,15 +1049,6 @@ with tab_novel:
                 aff_url_n  = st.text_input("アフィリエイトURL", key="novel_aff_url")
 
         st.markdown("---")
-        use_multi_n = st.toggle(
-            "🤖 マルチエージェントモード（推奨）",
-            value=True,
-            key="novel_multi_agent",
-            help="リサーチャー・プランナー・ライター・編集者・ファクトチェッカー・バズ分析の6エージェントが協議して執筆します。生成時間が長くなりますが品質が向上します。",
-        )
-        if use_multi_n:
-            st.caption("🔬 リサーチ → 💬 協議 → ✍️ 執筆 → 🔍 矛盾チェック → ✂️ 編集 → 📊 バズ分析")
-
         if tips_mode_n:
             if st.button("🔥 TIPSコンテンツを生成する（4章構成・約4,800字）",
                          type="primary", key="novel_tips_generate", use_container_width=True, disabled=not api_key_set()):
