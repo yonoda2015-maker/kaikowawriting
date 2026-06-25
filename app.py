@@ -499,6 +499,31 @@ def run_novel_with_progress(genre, idea, chars, x_safe, style_hint, horror_level
     return result
 
 
+def run_with_neko(fn, steps_labels: list[str], lang: str = "ja"):
+    """
+    汎用ねこ編集長ラッパー。
+    fn(progress_cb) を呼び出し、steps_labelsのステップ数でアニメーションを流す。
+    fn は progress_cb(step, total, label) を受け取る関数か、
+    呼び出せばOKな引数なしの関数のどちらでもOK。
+    """
+    slot = st.empty()
+    total = len(steps_labels)
+
+    def cb(step, total_=None, label=None):
+        t = total_ if total_ is not None else total
+        l = label if label is not None else (steps_labels[min(step - 1, total - 1)] if steps_labels else "生成中…")
+        slot.markdown(_make_editor_html(step, t, l, lang), unsafe_allow_html=True)
+
+    # ステップ0表示（開始アニメーション）
+    cb(1)
+    try:
+        result = fn(cb)
+    finally:
+        done = "Done!" if lang == "en" else "完成！"
+        slot.markdown(_make_editor_html(total, total, done, lang), unsafe_allow_html=True)
+    return result
+
+
 # ── メインタブ ────────────────────────────────────
 tab_post, tab_novel, tab_article, tab_haunted, tab_ideas, tab_queue, tab_history, tab_analysis, tab_batch = st.tabs([
     "📱 投稿をつくる",
@@ -718,46 +743,53 @@ with tab_post:
             elif not idea_text.strip():
                 st.error("⚠️ ネタを入力してください（STEP 3）")
             else:
-                with st.spinner("AIが文章を考えています...（10〜20秒）"):
-                    try:
+                try:
+                    _post_steps = ["ネタを分析中…", "文章を構成中…", "執筆中…", "仕上げ中…"]
+                    def _gen_post(cb):
+                        cb(1, 4, "ネタを分析中…")
                         if one_shot_mode:
-                            content = generate_sns_one_shot(genre, style, idea_text, get_x_safe(), output_lang=output_lang_post)
-                            st.session_state.update({
-                                "post_content": content, "post_pending": content,
-                                "post_score": calc_quality_score(content), "ab_content_a": None,
-                            })
+                            cb(2, 4, "ワンショット生成中…")
+                            r = generate_sns_one_shot(genre, style, idea_text, get_x_safe(), output_lang=output_lang_post)
+                            cb(4, 4, "完成！")
+                            return ("one_shot", r)
                         elif ab_mode:
-                            ca, cb = generate_ab_pair(genre, idea_text, style, style_b, char_count, get_x_safe())
-                            st.session_state.update({
-                                "ab_content_a": ca, "ab_content_b": cb,
-                                "ab_style_a": style, "ab_style_b": style_b,
-                                "post_content": ca, "post_pending": ca,
-                                "post_score": calc_quality_score(ca),
-                            })
+                            cb(2, 4, "パターンA生成中…")
+                            ra, rb = generate_ab_pair(genre, idea_text, style, style_b, char_count, get_x_safe())
+                            cb(4, 4, "完成！")
+                            return ("ab", ra, rb)
                         else:
-                            content = generate_post_with_learning(genre, style, idea_text, char_count, get_x_safe(), top_patterns, style_hint=style_hint, horror_level=horror_level)
-                            if note_url or aff_url:
-                                content = add_monetization(content, "post", aff_url, note_url)
-                            st.session_state.update({
-                                "post_content": content, "post_pending": content,
-                                "post_score": calc_quality_score(content), "ab_content_a": None,
-                            })
-                        if auto_ht:
-                            base = st.session_state["post_content"]
-                            ht   = generate_optimized_hashtags(base, genre, top_tags) if top_tags else generate_hashtags(base, genre)
-                            st.session_state["post_hashtags"] = ht
-                        else:
-                            st.session_state["post_hashtags"] = ""
-                        if selected_idea:
-                            db.mark_idea_used(selected_idea["id"])
-                        if "advance_series_id" in st.session_state:
-                            db.advance_series(st.session_state.pop("advance_series_id"))
-                        db.save_content("post", genre, style, st.session_state["post_content"], st.session_state["post_score"])
-                        st.session_state.pop("date_idea", None)
-                        st.toast("✅ 生成が完了しました！右側を確認してください", icon="✅")
-                    except Exception as e:
-                        logger.error(f"Post generation error: {e}")
-                        st.error(f"生成中にエラーが発生しました: {e}")
+                            cb(2, 4, "執筆中…")
+                            r = generate_post_with_learning(genre, style, idea_text, char_count, get_x_safe(), top_patterns, style_hint=style_hint, horror_level=horror_level)
+                            cb(4, 4, "完成！")
+                            return ("post", r)
+                    post_result = run_with_neko(_gen_post, _post_steps, lang=output_lang_post)
+                    if post_result[0] == "one_shot":
+                        content = post_result[1]
+                        st.session_state.update({"post_content": content, "post_pending": content, "post_score": calc_quality_score(content), "ab_content_a": None})
+                    elif post_result[0] == "ab":
+                        ca, cb_ = post_result[1], post_result[2]
+                        st.session_state.update({"ab_content_a": ca, "ab_content_b": cb_, "ab_style_a": style, "ab_style_b": style_b, "post_content": ca, "post_pending": ca, "post_score": calc_quality_score(ca)})
+                    else:
+                        content = post_result[1]
+                        if note_url or aff_url:
+                            content = add_monetization(content, "post", aff_url, note_url)
+                        st.session_state.update({"post_content": content, "post_pending": content, "post_score": calc_quality_score(content), "ab_content_a": None})
+                    if auto_ht:
+                        base = st.session_state["post_content"]
+                        ht   = generate_optimized_hashtags(base, genre, top_tags) if top_tags else generate_hashtags(base, genre)
+                        st.session_state["post_hashtags"] = ht
+                    else:
+                        st.session_state["post_hashtags"] = ""
+                    if selected_idea:
+                        db.mark_idea_used(selected_idea["id"])
+                    if "advance_series_id" in st.session_state:
+                        db.advance_series(st.session_state.pop("advance_series_id"))
+                    db.save_content("post", genre, style, st.session_state["post_content"], st.session_state["post_score"])
+                    st.session_state.pop("date_idea", None)
+                    st.toast("✅ 生成が完了しました！右側を確認してください", icon="✅")
+                except Exception as e:
+                    logger.error(f"Post generation error: {e}")
+                    st.error(f"生成中にエラーが発生しました: {e}")
 
     with col2:
         st.markdown("### プレビュー・投稿")
@@ -1239,25 +1271,23 @@ with tab_article:
                 elif not idea_text_a.strip():
                     st.error("⚠️ ネタを入力してください")
                 else:
-                    with st.spinner("4章構成で書いています...（数分かかります）"):
-                        try:
+                    try:
+                        def _gen_tips_a(cb):
+                            cb(1, 5, "構成を設計中…")
                             tips_url_val_a = st.session_state.get("article_tips_url", "")
-                            result_a = generate_tips_pipeline(genre_a, idea_text_a, tips_url=tips_url_val_a,
-                                                              x_safe=get_x_safe(), horror_level=horror_level_a)
-                            full_text_a = result_a["free_part"] + "\n\n" + result_a["paid_part"]
-                            st.session_state.update({
-                                "article_content": full_text_a,
-                                "article_score": calc_quality_score(full_text_a),
-                                "article_title": result_a["title"],
-                                "tips_result_a": result_a,
-                                "tips_mode_active_a": True,
-                            })
-                            if selected_idea_a:
-                                db.mark_idea_used(selected_idea_a["id"])
-                            db.save_content("article", genre_a, article_type, full_text_a, st.session_state["article_score"])
-                            st.toast("✅ TIPSコンテンツが完成しました！", icon="💰")
-                        except Exception as e:
-                            logger.error(f"TIPS article error: {e}"); st.error(f"生成エラー: {e}")
+                            cb(2, 5, "無料パートを執筆中…")
+                            r = generate_tips_pipeline(genre_a, idea_text_a, tips_url=tips_url_val_a, x_safe=get_x_safe(), horror_level=horror_level_a)
+                            cb(5, 5, "完成！")
+                            return r
+                        result_a = run_with_neko(_gen_tips_a, ["構成","無料パート","有料パート","編集","完成"], lang=output_lang_a)
+                        full_text_a = result_a["free_part"] + "\n\n" + result_a["paid_part"]
+                        st.session_state.update({"article_content": full_text_a, "article_score": calc_quality_score(full_text_a), "article_title": result_a["title"], "tips_result_a": result_a, "tips_mode_active_a": True})
+                        if selected_idea_a:
+                            db.mark_idea_used(selected_idea_a["id"])
+                        db.save_content("article", genre_a, article_type, full_text_a, st.session_state["article_score"])
+                        st.toast("✅ TIPSコンテンツが完成しました！", icon="💰")
+                    except Exception as e:
+                        logger.error(f"TIPS article error: {e}"); st.error(f"生成エラー: {e}")
         else:
             st.session_state["tips_mode_active_a"] = False
             if st.button(f"🔥 記事を生成する（約{article_chars_input:,}字）",
@@ -1267,20 +1297,23 @@ with tab_article:
                 elif not idea_text_a.strip():
                     st.error("⚠️ ネタを入力してください")
                 else:
-                    with st.spinner(f"記事を書いています...（{article_chars_input:,}字・数分かかります）"):
-                        try:
-                            ca, title_a, title_cands_a = generate_article(genre_a, idea_text_a, article_type, article_chars_input, include_story, x_safe=get_x_safe(), horror_level=horror_level_a, style_hint=style_hint_a, output_lang=output_lang_a)
-                            if st.session_state.get("article_note_url") or st.session_state.get("article_aff_url"):
-                                ca = add_monetization(ca, "article", st.session_state.get("article_aff_url", ""), st.session_state.get("article_note_url", ""))
-                            st.session_state.update({"article_content": ca, "article_pending": ca,
-                                                      "article_score": calc_quality_score(ca), "article_title": title_a,
-                                                      "article_title_candidates_main": title_cands_a})
-                            if selected_idea_a:
-                                db.mark_idea_used(selected_idea_a["id"])
-                            db.save_content("article", genre_a, article_type, ca, st.session_state["article_score"])
-                            st.toast("✅ 記事が完成しました！右側を確認してください", icon="📰")
-                        except Exception as e:
-                            logger.error(f"Article error: {e}"); st.error(f"生成エラー: {e}")
+                    try:
+                        def _gen_article(cb):
+                            cb(1, 5, "リサーチ中…")
+                            cb(2, 5, "構成を設計中…")
+                            r = generate_article(genre_a, idea_text_a, article_type, article_chars_input, include_story, x_safe=get_x_safe(), horror_level=horror_level_a, style_hint=style_hint_a, output_lang=output_lang_a)
+                            cb(5, 5, "完成！")
+                            return r
+                        ca, title_a, title_cands_a = run_with_neko(_gen_article, ["リサーチ","構成","執筆","編集","完成"], lang=output_lang_a)
+                        if st.session_state.get("article_note_url") or st.session_state.get("article_aff_url"):
+                            ca = add_monetization(ca, "article", st.session_state.get("article_aff_url", ""), st.session_state.get("article_note_url", ""))
+                        st.session_state.update({"article_content": ca, "article_pending": ca, "article_score": calc_quality_score(ca), "article_title": title_a, "article_title_candidates_main": title_cands_a})
+                        if selected_idea_a:
+                            db.mark_idea_used(selected_idea_a["id"])
+                        db.save_content("article", genre_a, article_type, ca, st.session_state["article_score"])
+                        st.toast("✅ 記事が完成しました！右側を確認してください", icon="📰")
+                    except Exception as e:
+                        logger.error(f"Article error: {e}"); st.error(f"生成エラー: {e}")
         if not api_key_set():
             st.caption("⚠️ サイドバーでAPIキーを設定してください")
 
@@ -1536,28 +1569,22 @@ with tab_haunted:
                     if not require_api_key():
                         pass
                     else:
-                        with st.spinner(f"「{jp_name or en_name}」の記事を書いています...（{final_chars:,}字・数分かかります）"):
-                            try:
-                                body, title_h = generate_blog_post(
-                                    spot_name=en_name,
-                                    spot_name_jp=jp_name,
-                                    region=region_val,
-                                    char_count=final_chars,
-                                    x_safe=get_x_safe(),
-                                    style_hint=style_hint_h,
-                                )
-                                score_h = calc_quality_score(body)
-                                st.session_state.update({
-                                    "h_body": body, "h_pending": body,
-                                    "h_title": title_h, "h_score": score_h,
-                                    "h_spot_used_id": sel_spot["id"],
-                                })
-                                db.save_content("article", "心霊スポット（世界）", "ブログ記事風", body, score_h)
-                                db.mark_idea_used(sel_spot["id"])
-                                st.toast("✅ 記事が完成しました！右側を確認してください", icon="🌍")
-                            except Exception as e:
-                                logger.error(f"Blog generation error: {e}")
-                                st.error(f"生成エラー: {e}")
+                        try:
+                            def _gen_blog(cb):
+                                cb(1, 4, f"「{jp_name or en_name}」を調査中…")
+                                cb(2, 4, "記事を執筆中…")
+                                r = generate_blog_post(spot_name=en_name, spot_name_jp=jp_name, region=region_val, char_count=final_chars, x_safe=get_x_safe(), style_hint=style_hint_h)
+                                cb(4, 4, "完成！")
+                                return r
+                            body, title_h = run_with_neko(_gen_blog, ["調査","執筆","編集","完成"])
+                            score_h = calc_quality_score(body)
+                            st.session_state.update({"h_body": body, "h_pending": body, "h_title": title_h, "h_score": score_h, "h_spot_used_id": sel_spot["id"]})
+                            db.save_content("article", "心霊スポット（世界）", "ブログ記事風", body, score_h)
+                            db.mark_idea_used(sel_spot["id"])
+                            st.toast("✅ 記事が完成しました！右側を確認してください", icon="🌍")
+                        except Exception as e:
+                            logger.error(f"Blog generation error: {e}")
+                            st.error(f"生成エラー: {e}")
 
     # ── 右列：プレビュー ──
     with h_col2:
