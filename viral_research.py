@@ -19,24 +19,9 @@ from typing import Optional
 
 import requests
 
+from grok_auth import get_access_token, grok_available
+
 DB_PATH = Path(__file__).parent / "kowamoshiro.db"
-_AUTH_PATH = Path.home() / ".grok" / "auth.json"
-
-# Railway等、~/.grok/auth.jsonが存在しない本番環境向けのOIDCリフレッシュ
-# （x_monitor.pyと同じロジック。GROK_REFRESH_TOKEN環境変数で動く）
-_OIDC_TOKEN_URL = "https://auth.x.ai/oauth2/token"
-_OIDC_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"
-_cached_token: dict = {"key": "", "expires_at": ""}
-
-
-def _refresh_access_token(refresh_token: str) -> str:
-    res = requests.post(_OIDC_TOKEN_URL, data={
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token,
-        "client_id": _OIDC_CLIENT_ID,
-    })
-    res.raise_for_status()
-    return res.json()["access_token"]
 
 # Xポリシーで絶対に避けるべきトピックカテゴリ
 _UNSAFE_CATEGORIES = [
@@ -62,40 +47,12 @@ _SAFE_TREND_CATEGORIES = [
 ]
 
 
-def _get_token() -> str:
-    global _cached_token
-
-    # 環境変数のリフレッシュトークンを優先（Railway等の本番環境用）
-    refresh_token = os.getenv("GROK_REFRESH_TOKEN")
-    if refresh_token:
-        expires_at = _cached_token.get("expires_at", "")
-        if not expires_at or datetime.fromisoformat(expires_at) - datetime.now() < timedelta(minutes=5):
-            try:
-                new_token = _refresh_access_token(refresh_token)
-                _cached_token = {
-                    "key": new_token,
-                    "expires_at": (datetime.now() + timedelta(hours=6)).isoformat()
-                }
-            except Exception:
-                pass
-        if _cached_token.get("key"):
-            return _cached_token["key"]
-
-    # ローカルのauth.jsonにフォールバック
-    if _AUTH_PATH.exists():
-        with open(_AUTH_PATH) as f:
-            d = json.load(f)
-        return list(d.values())[0]["key"]
-
-    raise RuntimeError("Grokトークンが見つかりません。GROK_REFRESH_TOKEN を設定するか grok login してください。")
-
-
 def _grok_chat(prompt: str, days: int = 3) -> str:
     from xai_sdk import Client
     from xai_sdk.chat import user as xai_user
     from xai_sdk.tools import x_search
 
-    client = Client(api_key=_get_token())
+    client = Client(api_key=get_access_token())
     chat = client.chat.create(
         model="grok-3",
         tools=[x_search(
@@ -109,10 +66,6 @@ def _grok_chat(prompt: str, days: int = 3) -> str:
         if chunk.content:
             raw += chunk.content
     return raw.strip()
-
-
-def grok_available() -> bool:
-    return _AUTH_PATH.exists() or bool(os.getenv("GROK_REFRESH_TOKEN"))
 
 
 # ────────────────────────────────────────────────

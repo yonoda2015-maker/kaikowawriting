@@ -20,6 +20,8 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
+from grok_auth import get_access_token
+
 load_dotenv(Path(__file__).parent / ".env")
 
 DISCORD_WEBHOOK = os.getenv(
@@ -42,55 +44,6 @@ WATCH_ACCOUNTS = [
     "@NihonHorror",
     "@kiwakowa",
 ]
-
-AUTH_PATH = Path.home() / ".grok" / "auth.json"
-_OIDC_TOKEN_URL = "https://auth.x.ai/oauth2/token"
-_OIDC_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828"
-
-_cached_token: dict = {"key": "", "expires_at": ""}
-
-
-def _refresh_access_token(refresh_token: str) -> str:
-    """リフレッシュトークンでアクセストークンを更新"""
-    res = requests.post(_OIDC_TOKEN_URL, data={
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token,
-        "client_id": _OIDC_CLIENT_ID,
-    })
-    res.raise_for_status()
-    data = res.json()
-    return data["access_token"]
-
-
-def _get_grok_token() -> str:
-    global _cached_token
-
-    # まず環境変数のリフレッシュトークンで更新を試みる
-    refresh_token = os.getenv("GROK_REFRESH_TOKEN")
-    if refresh_token:
-        expires_at = _cached_token.get("expires_at", "")
-        # 5分前に更新
-        if not expires_at or datetime.fromisoformat(expires_at) - datetime.now() < timedelta(minutes=5):
-            try:
-                new_token = _refresh_access_token(refresh_token)
-                _cached_token = {
-                    "key": new_token,
-                    "expires_at": (datetime.now() + timedelta(hours=6)).isoformat()
-                }
-                print(f"  [Grok] アクセストークンを更新しました")
-            except Exception as e:
-                print(f"  [Grok] トークン更新失敗: {e}")
-        if _cached_token.get("key"):
-            return _cached_token["key"]
-
-    # ローカルのauth.jsonを使う
-    if AUTH_PATH.exists():
-        with open(AUTH_PATH) as f:
-            d = json.load(f)
-        return list(d.values())[0]["key"]
-
-    raise RuntimeError("Grokトークンが見つかりません。GROK_REFRESH_TOKEN を設定してください。")
-
 
 def _init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -128,7 +81,7 @@ def fetch_new_posts() -> list[dict]:
     from xai_sdk.chat import user as xai_user
     from xai_sdk.tools import x_search
 
-    client = Client(api_key=_get_grok_token())
+    client = Client(api_key=get_access_token())
     accounts_str = " OR ".join(f"from:{a.lstrip('@')}" for a in WATCH_ACCOUNTS)
 
     chat = client.chat.create(
@@ -251,7 +204,7 @@ def fetch_own_likes(days: int = 7) -> list[dict]:
     from xai_sdk.chat import user as xai_user
     from xai_sdk.tools import x_search
 
-    client = Client(api_key=_get_grok_token())
+    client = Client(api_key=get_access_token())
     chat = client.chat.create(
         model="grok-3",
         tools=[x_search(
