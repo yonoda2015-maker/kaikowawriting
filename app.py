@@ -48,6 +48,7 @@ from viral_research import (
     fetch_safe_trends, load_latest_trends, build_trend_hint,
     policy_check_content, grok_available, xai_available,
     analyze_account, load_account_analysis, build_account_syntax_hint,
+    SEED_SOURCES, fetch_horror_seeds_from_source,
 )
 DB_PATH = Path(__file__).parent / "kowamoshiro.db"
 from threads_api import post_to_threads
@@ -595,12 +596,13 @@ def run_with_neko(fn, steps_labels: list[str], lang: str = "ja"):
 
 
 # ── メインタブ ────────────────────────────────────
-tab_post, tab_novel, tab_article, tab_haunted, tab_ideas, tab_queue, tab_history, tab_analysis, tab_batch = st.tabs([
+tab_post, tab_novel, tab_article, tab_haunted, tab_ideas, tab_seedsource, tab_queue, tab_history, tab_analysis, tab_batch = st.tabs([
     "📱 投稿をつくる",
     "📖 小説をつくる",
     "📰 記事をつくる",
     "🌍 心霊スポットブログ",
     "🗃️ ネタバンク",
+    "👻 実話ネタ収集",
     "📅 投稿スケジュール",
     "📚 生成履歴",
     "📊 分析レポート",
@@ -1951,8 +1953,15 @@ with tab_ideas:
         if not ideas_all:
             st.markdown('<div class="empty-state"><div style="font-size:2rem">🗃️</div><div>ネタがありません<br><small>上の「新しいネタを追加する」から追加してください</small></div></div>', unsafe_allow_html=True)
         else:
-            st.caption(f"{len(ideas_all)}件のネタ")
-            for idea in ideas_all:
+            PAGE_SIZE = 50
+            total_pages = max(1, (len(ideas_all) - 1) // PAGE_SIZE + 1)
+            pc1, pc2 = st.columns([3, 1])
+            with pc1:
+                st.caption(f"{len(ideas_all)}件のネタ（{total_pages}ページ）")
+            with pc2:
+                page = st.number_input("ページ", 1, total_pages, 1, key="idea_bank_page") - 1
+            page_ideas = ideas_all[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
+            for idea in page_ideas:
                 c1, c2 = st.columns([5, 1])
                 with c1:
                     badge = f"🔴 {idea['used']}回使用" if idea["used"] > 0 else "🟢 未使用"
@@ -1994,6 +2003,67 @@ with tab_ideas:
                 if st.button("🗑️", key=f"del_series_{s['id']}", help="削除"):
                     db.delete_series(s["id"]); st.rerun()
             st.markdown("---")
+
+
+# ═══════════════════════════════════════════════
+# 実話ネタ収集タブ
+# ═══════════════════════════════════════════════
+with tab_seedsource:
+    st.markdown("## 👻 実話ネタ収集")
+    st.caption("Reddit・X・オカルト板・Yahoo!知恵袋の実話をGrokで検索して、ネタバンクに取り込みます")
+
+    if not grok_available():
+        st.warning("Grok連携が未設定です。ターミナルで `grok login` を実行してください。")
+    else:
+        st.markdown("### STEP 1　ジャンルを選ぶ")
+        seed_genre = st.selectbox("ジャンル", GENRES, key="seed_source_genre")
+
+        st.markdown("### STEP 2　ネタ元を選ぶ")
+        source_labels = {k: v["label"] for k, v in SEED_SOURCES.items()}
+        seed_cols = st.columns(len(source_labels))
+        for col, (key, label) in zip(seed_cols, source_labels.items()):
+            with col:
+                st.markdown(f"#### {label}")
+        seed_source_key = st.radio(
+            "ネタ元を選ぶ",
+            list(source_labels.keys()),
+            format_func=lambda k: source_labels[k],
+            key="seed_source_tab",
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+
+        st.markdown("### STEP 3　取得する")
+        if st.button("🔎 ネタを取得する", key="seed_source_fetch_btn", type="primary", use_container_width=True):
+            with st.spinner(f"{source_labels[seed_source_key]}からネタを探しています...（20〜40秒）"):
+                fetched = fetch_horror_seeds_from_source(seed_source_key, count=5)
+                st.session_state["seed_source_ideas"] = fetched
+                st.session_state["seed_source_ideas_genre"] = seed_genre
+                st.session_state["seed_source_ideas_label"] = source_labels[seed_source_key]
+
+        seed_ideas = st.session_state.get("seed_source_ideas", [])
+        if seed_ideas:
+            seed_genre_saved = st.session_state.get("seed_source_ideas_genre", GENRES[0])
+            seed_label_saved = st.session_state.get("seed_source_ideas_label", "")
+            st.markdown("---")
+            st.markdown(f"### {seed_label_saved} から取得したネタ（{len(seed_ideas)}件）")
+            if st.button("✅ 全部まとめてネタバンクに追加", key="add_all_seed_source", type="primary", use_container_width=True):
+                for item in seed_ideas:
+                    db.add_idea(item.get("fact", "")[:60], seed_genre_saved,
+                                f"{item.get('fact','')}\n\n出典: {item.get('source','')}")
+                st.success(f"✅ {len(seed_ideas)}件のネタを追加しました！")
+                st.session_state["seed_source_ideas"] = []; st.rerun()
+            for i, item in enumerate(seed_ideas):
+                si1, si2 = st.columns([4, 1])
+                with si1:
+                    st.markdown(f"**{item.get('fact','')[:60]}**")
+                    st.caption(f"{item.get('fact','')}｜出典: {item.get('source','')}")
+                with si2:
+                    if st.button("追加", key=f"seed_source_add_{i}", use_container_width=True):
+                        db.add_idea(item.get("fact", "")[:60], seed_genre_saved,
+                                    f"{item.get('fact','')}\n\n出典: {item.get('source','')}")
+                        seed_ideas.pop(i); st.session_state["seed_source_ideas"] = seed_ideas; st.rerun()
+                st.markdown("---")
 
 
 # ═══════════════════════════════════════════════

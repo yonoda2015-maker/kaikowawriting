@@ -134,26 +134,23 @@ def fetch_new_posts() -> list[dict]:
     chat = client.chat.create(
         model="grok-3",
         tools=[x_search(
-            from_date=datetime.now() - timedelta(hours=3),
+            from_date=datetime.now() - timedelta(hours=24),
             to_date=datetime.now(),
         )],
     )
-    chat.append(xai_user(f"""以下のアカウントの直近3時間以内の新着投稿を取得してください。
+    or_query = " OR ".join(f"from:{a.lstrip('@')}" for a in WATCH_ACCOUNTS)
+    chat.append(xai_user(f"""X検索クエリ: {or_query}
 
-対象: {", ".join(WATCH_ACCOUNTS)}
+上記クエリで直近24時間のオリジナル投稿（RT・リプライ除く）を取得してください。
 
-条件:
-- リプライ・RTは除外（オリジナル投稿のみ）
-- 政治・犯罪・差別・自傷系は除外
-
-各投稿についてJSON形式で:
+JSON:
 {{
   "posts": [
     {{
       "post_id": "投稿IDの数字部分",
       "account": "@アカウント名",
       "url": "https://x.com/アカウント名/status/投稿ID",
-      "text": "本文全文",
+      "text": "本文（200字以内）",
       "likes": いいね数
     }}
   ]
@@ -180,7 +177,7 @@ def generate_reply(post: dict) -> str:
     import anthropic
     client = anthropic.Anthropic()
 
-    prompt = f"""@kaikowa_581（怪談・百物語・心霊ホラー系、フォロワー約4,000人）として以下の投稿にリプライする文章を書いてください。
+    prompt = f"""@kaikowa_581（怪談・心霊ホラー系、フォロワー約4,000人）として以下の投稿にリプライする文章を書いてください。
 
 投稿者: {post['account']}
 投稿内容: {post['text'][:300]}
@@ -189,7 +186,7 @@ def generate_reply(post: dict) -> str:
 - 140字以内
 - コピペしてそのまま投稿できる完成形
 - 押しつけがましくない・自然な会話
-- 百物語・怪談の世界観を1〜2語さりげなく入れる（地震など緊急時は入れない）
+- 怪談・心霊の世界観を1〜2語さりげなく入れる（地震など緊急時は入れない）
 - 絵文字は0〜1個
 - 自アカウントの宣伝は絶対に入れない
 
@@ -233,6 +230,114 @@ def send_to_discord(post: dict, reply: str):
     requests.post(DISCORD_WEBHOOK, json=msg)
 
 
+def _init_likes_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS own_post_likes (
+            post_id TEXT PRIMARY KEY,
+            url TEXT,
+            text TEXT,
+            likes INTEGER,
+            fetched_at TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def fetch_own_likes(days: int = 7) -> list[dict]:
+    """@kaikowa_581の直近投稿といいね数をGrokで取得"""
+    from xai_sdk import Client
+    from xai_sdk.chat import user as xai_user
+    from xai_sdk.tools import x_search
+
+    client = Client(api_key=_get_grok_token())
+    chat = client.chat.create(
+        model="grok-3",
+        tools=[x_search(
+            from_date=datetime.now() - timedelta(days=days),
+            to_date=datetime.now(),
+        )],
+    )
+    chat.append(xai_user(f"""@kaikowa_581 の直近{days}日以内のオリジナル投稿（RTやリプライ除く）をいいね数とともに取得してください。
+
+JSON形式で返してください:
+{{
+  "posts": [
+    {{
+      "post_id": "投稿IDの数字部分",
+      "url": "https://x.com/kaikowa_581/status/投稿ID",
+      "text": "本文（100字以内）",
+      "likes": いいね数（整数）
+    }}
+  ]
+}}
+
+投稿が見つからない場合は {{"posts": []}} を返してください。"""))
+
+    raw = ""
+    for _, chunk in chat.stream():
+        if chunk.content:
+            raw += chunk.content
+
+    try:
+        s = raw.find("{"); e = raw.rfind("}") + 1
+        return json.loads(raw[s:e]).get("posts", []) if s >= 0 else []
+    except Exception:
+        return []
+
+
+def save_and_report_likes():
+    """いいね数を取得してDBに保存・Discordに報告"""
+    _init_likes_db()
+    print(f"[{datetime.now().strftime('%H:%M')}] @kaikowa_581 いいね数取得中...")
+
+    try:
+        posts = fetch_own_likes(days=7)
+    except Exception as e:
+        print(f"  取得エラー: {e}")
+        return
+
+    if not posts:
+        print("  投稿なし")
+        return
+
+    conn = sqlite3.connect(DB_PATH)
+    new_count = 0
+    for p in posts:
+        pid = p.get("post_id", "")
+        if not pid:
+            continue
+        existing = conn.execute("SELECT likes FROM own_post_likes WHERE post_id=?", (pid,)).fetchone()
+        if existing is None:
+            conn.execute(
+                "INSERT INTO own_post_likes (post_id, url, text, likes, fetched_at) VALUES (?,?,?,?,?)",
+                (pid, p.get("url",""), p.get("text","")[:200], p.get("likes",0), datetime.now().isoformat())
+            )
+            new_count += 1
+        else:
+            conn.execute("UPDATE own_post_likes SET likes=?, fetched_at=? WHERE post_id=?",
+                         (p.get("likes",0), datetime.now().isoformat(), pid))
+    conn.commit()
+    conn.close()
+
+    posts_sorted = sorted(posts, key=lambda x: x.get("likes", 0), reverse=True)
+    now = datetime.now().strftime("%Y/%m/%d %H:%M")
+
+    fields = []
+    for i, p in enumerate(posts_sorted[:10], 1):
+        fields.append({
+            "name": f"{'🥇🥈🥉'[i-1] if i <= 3 else f'{i}位'} ❤️{p.get('likes',0)}",
+            "value": f"{p.get('text','')[:80]}…\n[→ 投稿を開く]({p.get('url','')})",
+            "inline": False
+        })
+
+    msg = {"embeds": [{"title": f"📊 @kaikowa_581 いいね集計｜{now}", "color": 0x1DA1F2, "fields": fields,
+                       "footer": {"text": f"直近7日 {len(posts)}件取得 / 新規{new_count}件"}}]}
+    requests.post(DISCORD_WEBHOOK, json=msg)
+    print(f"  ✅ {len(posts)}件取得 Discord送信完了")
+
+
 def run_once():
     _init_db()
     print(f"[{datetime.now().strftime('%H:%M')}] 監視中... 対象{len(WATCH_ACCOUNTS)}アカウント")
@@ -259,8 +364,17 @@ def run_once():
 
 def run_loop(interval_minutes: int = 90):
     print(f"X監視ボット起動 — {interval_minutes}分ごとにチェック")
+    last_likes_date = None
     while True:
         run_once()
+        # 1日1回（正午以降の最初のループ）いいね集計
+        today = datetime.now().date()
+        if datetime.now().hour >= 12 and last_likes_date != today:
+            try:
+                save_and_report_likes()
+                last_likes_date = today
+            except Exception as e:
+                print(f"  いいね集計エラー: {e}")
         next_check = datetime.now() + timedelta(minutes=interval_minutes)
         print(f"  次回チェック: {next_check.strftime('%H:%M')}")
         time.sleep(interval_minutes * 60)
@@ -269,5 +383,7 @@ def run_loop(interval_minutes: int = 90):
 if __name__ == "__main__":
     if "--loop" in sys.argv:
         run_loop()
+    elif "--likes" in sys.argv:
+        save_and_report_likes()
     else:
         run_once()

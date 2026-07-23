@@ -234,9 +234,16 @@ def fetch_safe_trends(lang: str = "ja", limit: int = 5) -> list[dict]:
     """
     safe_cats = "・".join(_SAFE_TREND_CATEGORIES)
     unsafe_cats = "・".join(_UNSAFE_CATEGORIES[:10])
-    lang_note = "日本語のXで" if lang == "ja" else "on English X"
+    if lang == "ja":
+        lang_instruction = "日本のXユーザー（日本語投稿）の間で今日バズっているトレンドトピック"
+        lang_constraint = "【重要】日本語圏のトレンドのみ。英語圏・海外のトレンド（Taylor Swift・Star Warsなど）は絶対に含めないこと。"
+    else:
+        lang_instruction = "trending topics on English X today"
+        lang_constraint = ""
 
-    prompt = f"""今{lang_note}バズっているトレンドトピックを{limit}件教えてください。
+    prompt = f"""今現在、{lang_instruction}を{limit}件教えてください。
+
+{lang_constraint}
 
 【必須条件 — 以下を含むトピックは絶対に除外してください】
 除外カテゴリ: {unsafe_cats}、その他政治・犯罪・暴力・性的・差別に関わる全て
@@ -248,7 +255,7 @@ def fetch_safe_trends(lang: str = "ja", limit: int = 5) -> list[dict]:
 {{
   "trends": [
     {{
-      "topic": "トレンドのキーワード・話題",
+      "topic": "トレンドのキーワード・話題（日本語）",
       "category": "カテゴリ名",
       "why_viral": "バズっている理由（30字以内）",
       "horror_angle": "このトレンドと絡めた怖い話のネタ案（50字以内）",
@@ -312,6 +319,89 @@ def load_latest_trends() -> list[dict]:
     if not row:
         return []
     return json.loads(row[0] or "[]")
+
+
+# ────────────────────────────────────────────────
+# 0.5 実話ネタバンクの調達元（Grok X Search経由・APIキー不要）
+# 直接スクレイピングはネットワーク制限で不可のため、全てGrokの検索結果を使う。
+# ────────────────────────────────────────────────
+
+_REDDIT_HORROR_SUBS = [
+    "r/Glitch_in_the_Matrix",
+    "r/nosleep",
+    "r/creepyencounters",
+]
+
+# ネタ元カタログ: ネタバンクUIのタブ名 → (取得先の説明, Grokへの検索指示, 翻案が必要か)
+SEED_SOURCES = {
+    "reddit": {
+        "label": "🌐 Reddit（海外実話）",
+        "target": f"Reddit（{'・'.join(_REDDIT_HORROR_SUBS)}等）",
+        "instruction": "「日常のちょっとした説明のつかない体験」",
+        "localize": True,
+    },
+    "x_experience": {
+        "label": "🐦 X実体験談",
+        "target": "X（Twitter）の日本語投稿",
+        "instruction": "「実際に体験した説明のつかない出来事」として投稿された日本語のポスト",
+        "localize": False,
+    },
+    "occult_board": {
+        "label": "👻 オカルト板（洒落怖系）",
+        "target": "5ちゃんねる・したらば等のオカルト板（洒落怖・意味怖系スレ）",
+        "instruction": "スレで語られた「日常に潜む違和感」の実話・創作体験談",
+        "localize": False,
+    },
+    "yahoo_chie": {
+        "label": "💬 Yahoo!知恵袋",
+        "target": "Yahoo!知恵袋",
+        "instruction": "「これって普通ですか」「説明がつかないんですが」といった相談形式の不思議な体験質問",
+        "localize": False,
+    },
+}
+
+
+def fetch_horror_seeds_from_source(source_key: str, count: int = 5) -> list[dict]:
+    """
+    指定したネタ元（reddit/x_experience/occult_board/yahoo_chie）から
+    実話系「説明のつかない日常体験」をGrok X Search経由で取得する。
+
+    Returns: [{"fact": str, "source": str}, ...]
+    """
+    src = SEED_SOURCES.get(source_key)
+    if not src:
+        return []
+
+    localize_block = (
+        "各エピソードを日本の日常に置き換えて、事実だけ2〜3文で要約してください"
+        "（人名・地名は日本風に、海外特有の文化・習慣は日本の生活に翻案する）。"
+        if src["localize"] else
+        "各エピソードを事実だけ2〜3文で要約してください（日本語のまま、脚色を加えない）。"
+    )
+
+    prompt = f"""{src['target']}で話題になった{src['instruction']}を{count}個探してください。
+
+条件:
+- 超常現象・幽霊だと断定しない。「説明できない事実」レベルのものが理想
+- 政治・犯罪・暴力・性的なものは除外
+
+{localize_block}
+
+JSON形式のみ出力:
+{{"seeds": [{{"fact": "事実2〜3文", "source": "元ネタの出典（URL不明ならスレ名/投稿の特徴）"}}]}}"""
+
+    try:
+        raw = _grok_chat(prompt, days=60)
+        s = raw.find("{"); e = raw.rfind("}") + 1
+        data = json.loads(raw[s:e]) if s >= 0 else {}
+        return data.get("seeds", [])
+    except Exception:
+        return []
+
+
+def fetch_reddit_horror_seeds(count: int = 5) -> list[dict]:
+    """後方互換用ラッパー。fetch_horror_seeds_from_source('reddit', count) と同じ。"""
+    return fetch_horror_seeds_from_source("reddit", count)
 
 
 def build_trend_hint(trends: list[dict], genre: str) -> str:
