@@ -402,15 +402,22 @@ SEED_SOURCES = {
 }
 
 
+last_fetch_error: str = ""
+
+
 def fetch_horror_seeds_from_source(source_key: str, count: int = 5) -> list[dict]:
     """
     指定したネタ元（reddit/x_experience/occult_board/yahoo_chie）から
     実話系「説明のつかない日常体験」をGrok X Search経由で取得する。
 
     Returns: [{"fact": str, "source": str}, ...]
+    失敗時はモジュール変数 last_fetch_error にエラーメッセージを保存して [] を返す。
     """
+    global last_fetch_error
+
     src = SEED_SOURCES.get(source_key)
     if not src:
+        last_fetch_error = f"未知のネタ元です: {source_key}"
         return []
 
     localize_block = (
@@ -435,8 +442,10 @@ JSON形式のみ出力:
         raw = _grok_chat(prompt, days=60)
         s = raw.find("{"); e = raw.rfind("}") + 1
         data = json.loads(raw[s:e]) if s >= 0 else {}
+        last_fetch_error = ""
         return data.get("seeds", [])
-    except Exception:
+    except Exception as exc:
+        last_fetch_error = f"{type(exc).__name__}: {exc}"
         return []
 
 

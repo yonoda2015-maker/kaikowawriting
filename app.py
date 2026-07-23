@@ -50,6 +50,7 @@ from viral_research import (
     analyze_account, load_account_analysis, build_account_syntax_hint,
     SEED_SOURCES, fetch_horror_seeds_from_source,
 )
+import viral_research as vr
 DB_PATH = Path(__file__).parent / "kowamoshiro.db"
 from threads_api import post_to_threads
 from auth import check_login, logout, is_auth_enabled
@@ -2040,6 +2041,11 @@ with tab_seedsource:
                 st.session_state["seed_source_ideas"] = fetched
                 st.session_state["seed_source_ideas_genre"] = seed_genre
                 st.session_state["seed_source_ideas_label"] = source_labels[seed_source_key]
+                if not fetched:
+                    if vr.last_fetch_error:
+                        st.error(f"取得に失敗しました: {vr.last_fetch_error}")
+                    else:
+                        st.warning("ネタが見つかりませんでした。もう一度試してください。")
 
         seed_ideas = st.session_state.get("seed_source_ideas", [])
         if seed_ideas:
